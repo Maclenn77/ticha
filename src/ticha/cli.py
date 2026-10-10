@@ -6,7 +6,13 @@ from pathlib import Path
 from .core.scraper import TichaScraper
 from .core.text_scraper import TichaTextScraper
 from .core.image_scraper import TichaImageScraper
-from .core.line_pairing import DEFAULT_STATUSES, KrakenSegmenter, LinePairer
+from .core.line_pairing import (
+    DEFAULT_MODEL,
+    DEFAULT_STATUSES,
+    KrakenRecognizer,
+    KrakenSegmenter,
+    LinePairer,
+)
 from .utils.citation import generate_citation_info
 import pandas as pd
 
@@ -182,14 +188,20 @@ def pair_lines(args):
 
     try:
         segmenter = KrakenSegmenter(cache_dir=output_dir / "segmentation", device=args.device)
-    except ImportError as e:
+        recognizer = None
+        if not args.no_recognition:
+            recognizer = KrakenRecognizer(
+                args.model, cache_dir=output_dir / "recognition", device=args.device)
+    except (ImportError, FileNotFoundError) as e:
         print(f"Error: {e}")
         sys.exit(1)
 
     pairer = LinePairer(
         segmenter=segmenter,
+        recognizer=recognizer,
         statuses=statuses,
         split_columns=not args.no_split_columns,
+        cer_threshold=args.cer_threshold,
         export_lines=args.export_lines,
     )
 
@@ -205,6 +217,9 @@ def pair_lines(args):
     print(f"Documents skipped:          {counts.get('skipped', 0)}")
     if counts.get('error'):
         print(f"Pages with errors:          {counts['error']}")
+    if not manifest.empty and 'confident_lines' in manifest:
+        print(f"Confident line pairs:       {int(manifest['confident_lines'].sum())} "
+              f"of {int(manifest['paired_lines'].sum())} paired")
     print(f"Manifest: {(output_dir / 'manifest.csv').absolute()}")
 
 
@@ -278,8 +293,15 @@ def main():
     lines_parser.add_argument('-s', '--status', action='append',
                             help='Transcription status to keep; repeat for several, or "all" '
                                  '(default: "Completed and Checked" and "Completed but not Checked")')
+    lines_parser.add_argument('--model', type=str, default=DEFAULT_MODEL,
+                            help='kraken recognition model (path or DOI) used to align lines '
+                                 f'with the transcription (default: McCATMuS, {DEFAULT_MODEL})')
+    lines_parser.add_argument('--no-recognition', action='store_true',
+                            help='Pair lines in order instead (pages need equal line counts)')
+    lines_parser.add_argument('--cer-threshold', type=float, default=0.5,
+                            help='Highest character error rate for a confident pair (default: 0.5)')
     lines_parser.add_argument('--export-lines', action='store_true',
-                            help='Also write line images + .gt.txt for automatically paired pages')
+                            help='Also write line images + .gt.txt of confidently paired lines')
     lines_parser.add_argument('--no-split-columns', action='store_true',
                             help='Do not split transcription lines on runs of 4+ spaces')
     lines_parser.add_argument('--device', type=str, default='cpu',

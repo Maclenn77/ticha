@@ -52,6 +52,7 @@ dependencies = [
 [project.optional-dependencies]
 lines = [
     "kraken>=5.0",
+    "rapidfuzz>=3.0",
 ]
 dev = [
     "pytest>=7.0.0",

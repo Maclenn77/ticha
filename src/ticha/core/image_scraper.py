@@ -3,9 +3,9 @@
 Ticha shows manuscript pages with OpenSeadragon using Deep Zoom Images (DZI):
 an XML descriptor (``/images/dzi/<ticha_id>_<page>.dzi``) plus a pyramid of
 tiles stored at ``<ticha_id>_<page>_files/{level}/{col}_{row}.jpg``. The PDF
-links on the site return 500, so this module rebuilds each page by downloading the tiles of one
-pyramid level and stitching them into a single image (PNG/JPEG/TIFF), and can
-optionally bundle the pages into a local PDF.
+links on the site return 500, so this module rebuilds each page by downloading
+the tiles of one pyramid level and stitching them into a single image
+(PNG/JPEG/TIFF), and can optionally bundle the pages into a local PDF.
 """
 
 import json
@@ -206,6 +206,15 @@ def ticha_id_from_url(url: str) -> Optional[str]:
     """Extract the Ticha id from ``/en/texts/Oc111/`` or ``/en/text/Ma733/0/``."""
     match = TICHA_ID_RE.search(url)
     return match.group(1) if match else None
+
+
+def folio_from_source(source: Any, ticha_id: str = "") -> str:
+    """Folio of a DZI source: ``/images/dzi/Ma733T_1v.dzi`` -> ``1v``."""
+    url = source.url if isinstance(source, DZIInfo) else str(source)
+    name = re.sub(r"(_files/?|\.dzi)(\?.*)?$", "", url.rstrip("/")).rsplit("/", 1)[-1]
+    if ticha_id and name.startswith(f"{ticha_id}_"):
+        return name[len(ticha_id) + 1 :]
+    return name.rsplit("_", 1)[-1]
 
 
 class TichaImageScraper:
@@ -494,6 +503,7 @@ class TichaImageScraper:
         result: Dict[str, Any] = {
             "url": document_url,
             "image_paths": [],
+            "image_folios": [],
             "pdf_path": None,
             "error": None,
         }
@@ -531,6 +541,7 @@ class TichaImageScraper:
                 try:
                     self.download_dzi(source, path, max_dimension=max_dimension)
                     result["image_paths"].append(str(path))
+                    result["image_folios"].append(folio_from_source(source, stem))
                 except Exception as e:
                     logger.error(f"Failed page {page} of {document_url}: {e}")
 
@@ -569,5 +580,6 @@ class TichaImageScraper:
             )
             result["image_count"] = len(result["image_paths"])
             result["image_paths"] = ";".join(result["image_paths"])
+            result["image_folios"] = ";".join(result["image_folios"])
             rows.append({**row.to_dict(), **result})
         return pd.DataFrame(rows)

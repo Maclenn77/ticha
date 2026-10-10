@@ -105,33 +105,50 @@ Steps:
 1. **Cleaning**: documents without a transcription are skipped, and by
    default only `Completed and Checked` and `Completed but not Checked` are
    kept (`-s STATUS` to choose, `-s all` for every status).
-2. **Pages**: the transcription is split on its folio markers (`(8r)`,
-   `[40r]`, `(446)`) and matched with the page images in order.
-3. **Lines**: kraken finds the baselines; tiny or squeezed lines (folio
-   numbers, words inserted between lines) are kept as *fragments* without
-   text; lines are read top to bottom and left to right (signature columns
-   row by row), matching how Ticha lays out the transcription with spaces.
-4. **Pairing**: when the number of lines and transcription lines agree, the
-   page goes to `auto/`. Otherwise **nothing is discarded**: the page goes
-   to `review/`, pre-filled in order, with its transcription in a `.txt`.
+2. **Segmentation**: kraken finds the baselines. Tiny or squeezed lines
+   (folio numbers, words inserted between lines) are kept as *fragments*
+   without text; lines are read top to bottom and left to right (signature
+   columns row by row, two-page spreads left page first).
+3. **Recognition**: a generic HTR model
+   ([McCATMuS](https://doi.org/10.5281/zenodo.13788177), downloaded on first
+   use; `--model` to change it) reads each line roughly. The reading is only
+   used to find which transcription line belongs to which image line.
+4. **Alignment**: image lines and transcription lines are aligned in order;
+   image lines may stay without text (stamped-paper headers, untranscribed
+   signatures) and transcription lines may stay without an image line. Each
+   pair gets a confidence `1 - CER` between reading and transcription
+   (`--cer-threshold`, default 0.5). Pages are aligned on their own when the
+   transcription's folio markers (`(8r)`, `[40r]`) match the image folios,
+   otherwise the whole document at once.
+5. **Sorting**: pages where every transcription line found a confident line
+   go to `auto/`. **Nothing is discarded**: every other page goes to
+   `review/`, pre-filled with the best alignment, with the transcription
+   lines assigned to it in a `.txt`. The reason is in `manifest.csv`.
+
+`--no-recognition` skips steps 3-4 and pairs lines in order (a page is
+accepted only when the line counts agree).
 
 Output:
 
 ```
 dataset/
 ├── manifest.csv            # one row per page: status, reason, line counts
+├── lines.csv               # one row per line: text, HTR reading, CER, confident
 ├── auto/                   # PAGE XML + image, ready for training
-│   ├── Tl675a_page_001.png
-│   └── Tl675a_page_001.xml
+│   ├── Al714_page_001.png
+│   └── Al714_page_001.xml
 ├── review/                 # PAGE XML + image + .txt for human correction
 ├── lines/                  # with --export-lines: line_001.png + line_001.gt.txt
-└── segmentation/           # kraken cache (re-runs skip segmentation)
+│                           #   (every confident pair, also from review pages)
+├── segmentation/           # kraken caches: re-runs skip segmentation
+└── recognition/            #   and recognition
 ```
 
 The PAGE XML (2019-07-15 schema) files can be imported into
 [eScriptorium](https://escriptorium.inria.fr) together with their images to
 review/correct them, and used to train a model with
-`ketos train -f page dataset/auto/*.xml`.
+`ketos train -f page dataset/auto/*.xml`. The confidence of each pair is in
+`TextEquiv/@conf`.
 
 ## Data Structure
 
