@@ -1,9 +1,9 @@
 """Image scraper for Ticha documents.
 
 Ticha shows manuscript pages with OpenSeadragon using Deep Zoom Images (DZI):
-an XML descriptor (``page.dzi``) plus a pyramid of tiles stored at
-``page_files/{level}/{col}_{row}.{format}``. The PDF links on the site may
-return 500, so this module rebuilds each page by downloading the tiles of one
+an XML descriptor (``/images/dzi/<ticha_id>_<page>.dzi``) plus a pyramid of
+tiles stored at ``<ticha_id>_<page>_files/{level}/{col}_{row}.jpg``. The PDF
+links on the site return 500, so this module rebuilds each page by downloading the tiles of one
 pyramid level and stitching them into a single image (PNG/JPEG/TIFF), and can
 optionally bundle the pages into a local PDF.
 """
@@ -36,8 +36,17 @@ USER_AGENT = (
     "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
 )
 
-# URLs ending in .dzi (optionally with a query string), quoted in HTML/JS.
-DZI_URL_RE = re.compile(r"""["']([^"'\s]+?\.dzi(?:\?[^"'\s]*)?)["']""", re.I)
+# A quoted JS string ending in .dzi, optionally built by concatenating string
+# literals, e.g. ``"/images/dzi/" + "Ma733_1r.dzi"``.
+DZI_EXPR_RE = re.compile(
+    r"""((?:["'][^"'\n]*["']\s*\+\s*)*["'][^"'\n]*\.dzi(?:\?[^"'\n]*)?["'])""",
+    re.I,
+)
+JS_STRING_RE = re.compile(r"""["']([^"'\n]*)["']""")
+# ``const pageMap = {"01r": "0", "01v": "1"}`` on /<lang>/text/<id>/<n>/ pages
+PAGE_MAP_RE = re.compile(r"pageMap\s*=\s*(\{[^}]*\})")
+TICHA_ID_RE = re.compile(r"/texts?/([^/]+?)(?:\.pdf)?(?:/|$)")
+DZI_PREFIX = "/images/dzi/"
 # Inline tile sources: tileSources: { Image: { ... } }
 INLINE_DZI_RE = re.compile(r"""\{\s*["']?Image["']?\s*:\s*\{""")
 
@@ -146,6 +155,45 @@ def _js_object_to_json(block: str) -> str:
     return re.sub(r",\s*([}\]])", r"\1", block)
 
 
+def _page_range_to_list(pages: str) -> List[str]:
+    """
+    Expand a Ticha ``data-pages`` value exactly like ``call_the_dragon.js``.
+
+    ``"09r-10v"`` -> ``["9r", "9v", "10r", "10v"]``; ``"1-3"`` -> ``["1", "2", "3"]``.
+    A single page is kept verbatim. As in the JS, ranges go through
+    ``parseInt``, which drops leading zeros (the files on the server match).
+    """
+    split = pages.strip().split("-")
+    if len(split) == 1:
+        return split
+    first, last = split[0], split[1]
+    lead = re.compile(r"^\s*(\d+)")
+
+    def to_int(value: str) -> int:
+        match = lead.match(value)
+        if not match:
+            raise ValueError(f"Invalid page range: {pages}")
+        return int(match.group(1))
+
+    if first.endswith(("r", "v")):
+        start = to_int(first) * 2 + (1 if first.endswith("v") else 0)
+        end = to_int(last) * 2 + (1 if last.endswith("v") else 0)
+        return [f"{n // 2}{'v' if n % 2 else 'r'}" for n in range(start, end + 1)]
+    return [str(n) for n in range(to_int(first), to_int(last) + 1)]
+
+
+def _zero_stripped(dzi_url: str) -> Optional[str]:
+    """``.../Oc111_09r.dzi`` -> ``.../Oc111_9r.dzi`` (None if unchanged)."""
+    alt = re.sub(r"_0+(\d+[rv]?\.dzi)$", r"_\1", dzi_url)
+    return alt if alt != dzi_url else None
+
+
+def ticha_id_from_url(url: str) -> Optional[str]:
+    """Extract the Ticha id from ``/en/texts/Oc111/`` or ``/en/text/Ma733/0/``."""
+    match = TICHA_ID_RE.search(url)
+    return match.group(1) if match else None
+
+
 class TichaImageScraper:
     """Download page images of Ticha documents from their DZI tile pyramids."""
 
@@ -180,10 +228,11 @@ class TichaImageScraper:
         jitter = random.uniform(0.8, 1.2)
         time.sleep(self.rate_limit * jitter)
 
-    def _get(self, url: str) -> requests.Response:
+    def _get(self, url: str, retries: Optional[int] = None) -> requests.Response:
         """GET with retries on network errors and 5xx responses."""
         last_error: Optional[Exception] = None
-        for attempt in range(1, self.retries + 1):
+        retries = self.retries if retries is None else retries
+        for attempt in range(1, retries + 1):
             try:
                 response = self.session.get(url, timeout=self.timeout)
                 if response.status_code < 500:
@@ -196,7 +245,7 @@ class TichaImageScraper:
                 raise
             except requests.RequestException as e:
                 last_error = e
-            if attempt < self.retries:
+            if attempt < retries:
                 time.sleep(2**attempt * 0.5)
         raise last_error  # type: ignore[misc]
 
@@ -223,6 +272,18 @@ class TichaImageScraper:
                 seen.add(url)
                 sources.append(url)
 
+        # Handwritten texts: <script id="call_the_dragon" data-ticha-id="Oc111"
+        # data-pages="09r-09v">, expanded by call_the_dragon.js into
+        # /images/dzi/Oc111_9r.dzi, /images/dzi/Oc111_9v.dzi
+        for tag in soup.find_all(attrs={"data-ticha-id": True, "data-pages": True}):
+            try:
+                pages = _page_range_to_list(tag["data-pages"])
+            except ValueError as e:
+                logger.warning(str(e))
+                continue
+            for page in pages:
+                add_url(f"{DZI_PREFIX}{tag['data-ticha-id']}_{page}.dzi")
+
         # Attributes (href, src, data-*) that point to a .dzi file
         for tag in soup.find_all(True):
             for value in tag.attrs.values():
@@ -234,8 +295,9 @@ class TichaImageScraper:
         # Quoted .dzi URLs inside scripts (OpenSeadragon tileSources)
         for script in soup.find_all("script"):
             text = script.string or script.get_text() or ""
-            for match in DZI_URL_RE.finditer(text):
-                add_url(match.group(1).replace("\\/", "/"))
+            for match in DZI_EXPR_RE.finditer(text):
+                url = "".join(JS_STRING_RE.findall(match.group(1)))
+                add_url(url.replace("\\/", "/"))
             for match in INLINE_DZI_RE.finditer(text):
                 block = _extract_braced(text, match.start())
                 if not block:
@@ -254,12 +316,37 @@ class TichaImageScraper:
         logger.info(f"Found {len(sources)} DZI sources in {page_url}")
         return sources
 
+    def find_page_urls(self, html: Any, page_url: str) -> List[str]:
+        """
+        List every page URL of a paginated ``/<lang>/text/<id>/<n>/`` document.
+
+        These pages show one image each and embed ``pageMap`` (folio -> index).
+        Returns ``[page_url]`` for documents that are not paginated this way.
+        """
+        if isinstance(html, bytes):
+            html = html.decode("utf-8", errors="replace")
+        match = PAGE_MAP_RE.search(html)
+        if not match or not re.search(r"/\d+/?$", page_url):
+            return [page_url]
+        try:
+            page_map = json.loads(_js_object_to_json(match.group(1)))
+        except ValueError:
+            return [page_url]
+        indexes = sorted({int(v) for v in page_map.values() if str(v).isdigit()})
+        if not indexes:
+            return [page_url]
+        return [re.sub(r"/\d+/?$", f"/{i}/", page_url) for i in indexes]
+
     def find_pdf_links(self, html: Any, page_url: str) -> List[str]:
-        """Find links to PDF files in a document page."""
+        """Find links to PDF files (``*.pdf`` or ``download="*.pdf"``)."""
         soup = BeautifulSoup(html, "html.parser")
         links = []
         for a in soup.find_all("a", href=True):
-            if re.search(r"\.pdf(\?|$)", a["href"], re.I):
+            if "permissions" in a["href"]:
+                continue
+            if re.search(r"\.pdf(\?|$)", a["href"], re.I) or re.search(
+                r"\.pdf$", a.get("download") or "", re.I
+            ):
                 url = urljoin(page_url, a["href"])
                 if url not in links:
                     links.append(url)
@@ -269,7 +356,15 @@ class TichaImageScraper:
         """Return a DZIInfo, fetching and parsing the descriptor if needed."""
         if isinstance(source, DZIInfo):
             return source
-        return parse_dzi(self._get(source).content, source)
+        try:
+            return parse_dzi(self._get(source).content, source)
+        except requests.HTTPError as e:
+            alt = _zero_stripped(source)
+            status = getattr(e.response, "status_code", None)
+            if alt and status == 404:
+                logger.debug(f"{source} not found, trying {alt}")
+                return parse_dzi(self._get(alt).content, alt)
+            raise
 
     # ------------------------------------------------------------------ #
     # Download + stitching
@@ -337,7 +432,8 @@ class TichaImageScraper:
     def _download_pdf(self, pdf_url: str, output_path: Path) -> Optional[Path]:
         """Try to download an original PDF; return None if the server fails."""
         try:
-            response = self._get(pdf_url)
+            # The site answers 500 for most PDFs; don't insist.
+            response = self._get(pdf_url, retries=1)
         except requests.RequestException as e:
             logger.warning(f"PDF unavailable ({e}); falling back to DZI images")
             return None
@@ -390,10 +486,12 @@ class TichaImageScraper:
         try:
             html = self._get(document_url).content
             output_dir = Path(output_dir)
-            stem = (
-                re.sub(r"[^\w\-]+", "_", document_url.rstrip("/").split("/")[-1])
-                or "document"
-            )
+            stem = re.sub(
+                r"[^\w\-]+",
+                "_",
+                ticha_id_from_url(document_url)
+                or document_url.rstrip("/").split("/")[-1],
+            ) or "document"
 
             if try_pdf:
                 for pdf_url in self.find_pdf_links(html, document_url):
@@ -402,7 +500,14 @@ class TichaImageScraper:
                         result["pdf_path"] = str(pdf)
                         break
 
-            sources = self.find_image_sources(html, document_url)
+            sources = []
+            for page_url in self.find_page_urls(html, document_url):
+                page_html = (
+                    html if page_url == document_url else self._get(page_url).content
+                )
+                for source in self.find_image_sources(page_html, page_url):
+                    if source not in sources:
+                        sources.append(source)
             if not sources and not result["pdf_path"]:
                 result["error"] = "No DZI images or PDF found"
                 return result

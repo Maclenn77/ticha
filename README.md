@@ -55,15 +55,23 @@ ticha-scraper -o manuscripts.csv --no-headless
 
 ### Downloading page images
 
-The PDF links on Ticha can return `500 Internal Server Error`, so pages are
-rebuilt from the Deep Zoom Images (DZI) shown in the OpenSeadragon viewer:
-the scraper reads each `.dzi` descriptor, downloads the tiles of one pyramid
-level (`page_files/{level}/{col}_{row}.jpg`), and stitches them into a single
-image. The original PDF is tried first unless `--skip-pdf` is given.
+The PDF links on Ticha return `500 Internal Server Error`, so pages are
+rebuilt from the Deep Zoom Images (DZI) shown in the OpenSeadragon viewer
+(`/images/dzi/<ticha_id>_<page>.dzi`): the scraper reads each descriptor,
+downloads the tiles of one pyramid level
+(`/images/dzi/<ticha_id>_<page>_files/{level}/{col}_{row}.jpg`) and stitches
+them into a single image. Both page layouts are supported:
+
+- `/en/texts/<id>/` (the `document_link` values from the manuscripts CSV):
+  pages come from the `data-pages` range used by `call_the_dragon.js`.
+- `/en/text/<id>/<n>/`: one image per page; every page is visited using the
+  `pageMap` embedded in the page.
+
+The original PDF is tried first (one attempt) unless `--skip-pdf` is given.
 
 ```bash
 # One document
-ticha-scraper images -u https://ticha.haverford.edu/en/texts/<doc>/ -d images
+ticha-scraper images -u https://ticha.haverford.edu/en/texts/Oc111/ -d images
 
 # All documents from the manuscripts CSV, max 3000px per side, plus a PDF per document
 ticha-scraper images -i manuscripts.csv -d images --max-dimension 3000 --pdf

@@ -71,7 +71,9 @@ def fake_session(files):
         else:
             response.status_code = 404
             response.content = b""
-            response.raise_for_status = Mock(side_effect=requests.HTTPError("404"))
+            response.raise_for_status = Mock(
+                side_effect=requests.HTTPError("404", response=response)
+            )
         return response
 
     session.get.side_effect = get
@@ -199,3 +201,85 @@ def test_download_images_from_dataframe(scraper_with_pyramid, tmp_path):
     assert len(result) == 1
     assert result.iloc[0]["image_count"] == 1
     assert result.iloc[0]["document_name"] == "Doc 1"
+
+
+# Markup below mirrors the live Ticha pages (trimmed).
+
+HANDWRITTEN_HTML = """
+<li><a target="_blank" href="/en/texts/Oc111.pdf">PDF</a></li>
+<a href="http://ticha.haverford.edu/images/permissions/Ticha_permissions_from_AGEO.pdf">[PDF]</a>
+<div id="openseadragon1"></div>
+<script id="call_the_dragon" type="text/javascript"
+  src="/static/handwritten_texts/js/call_the_dragon.js"
+  data-ticha-id="Oc111" data-pages="09r-10v"></script>
+"""
+
+PAGINATED_HTML = """
+<a rel="noopener" download="testament, 1733.pdf" href="/text/Ma733/download/">
+<button class="download">PDF</button></a>
+<div id="openseadragon1"></div>
+<script>
+var url = "/images/dzi/" + "Ma733_1r.dzi";
+var viewer = OpenSeadragon({id: "openseadragon1", tileSources: url});
+</script>
+<script>
+const pageMap = {"01r": "0", "01v": "1"} // get the pageMap from the model
+</script>
+"""
+
+
+@pytest.mark.parametrize(
+    "pages, expected",
+    [
+        ("09r-10v", ["9r", "9v", "10r", "10v"]),
+        ("1v-2r", ["1v", "2r"]),
+        ("3-5", ["3", "4", "5"]),
+        ("09r", ["09r"]),
+    ],
+)
+def test_page_range_matches_call_the_dragon(pages, expected):
+    from ticha.core.image_scraper import _page_range_to_list
+
+    assert _page_range_to_list(pages) == expected
+
+
+def test_find_sources_handwritten_layout():
+    scraper = TichaImageScraper(rate_limit=0)
+    page_url = f"{BASE}/en/texts/Oc111/"
+    assert scraper.find_image_sources(HANDWRITTEN_HTML, page_url) == [
+        f"{BASE}/images/dzi/Oc111_{p}.dzi" for p in ("9r", "9v", "10r", "10v")
+    ]
+    assert scraper.find_pdf_links(HANDWRITTEN_HTML, page_url) == [
+        f"{BASE}/en/texts/Oc111.pdf"
+    ]
+    assert scraper.find_page_urls(HANDWRITTEN_HTML, page_url) == [page_url]
+
+
+def test_find_sources_paginated_layout():
+    scraper = TichaImageScraper(rate_limit=0)
+    page_url = f"{BASE}/en/text/Ma733/0/"
+    assert scraper.find_image_sources(PAGINATED_HTML, page_url) == [
+        f"{BASE}/images/dzi/Ma733_1r.dzi"
+    ]
+    assert scraper.find_pdf_links(PAGINATED_HTML, page_url) == [
+        f"{BASE}/text/Ma733/download/"
+    ]
+    assert scraper.find_page_urls(PAGINATED_HTML, page_url) == [
+        f"{BASE}/en/text/Ma733/0/",
+        f"{BASE}/en/text/Ma733/1/",
+    ]
+
+
+def test_ticha_id_from_url():
+    from ticha.core.image_scraper import ticha_id_from_url
+
+    assert ticha_id_from_url(f"{BASE}/en/texts/Oc111/") == "Oc111"
+    assert ticha_id_from_url(f"{BASE}/en/text/Ma733/0/") == "Ma733"
+
+
+def test_load_dzi_retries_without_leading_zero(scraper_with_pyramid):
+    scraper, files = scraper_with_pyramid
+    padded = DZI_URL.replace("page1.dzi", "doc_09r.dzi")
+    files[DZI_URL.replace("page1.dzi", "doc_9r.dzi")] = files[DZI_URL]
+    info = scraper.load_dzi(padded)
+    assert info.url.endswith("doc_9r.dzi")
