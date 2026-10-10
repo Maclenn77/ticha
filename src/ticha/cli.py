@@ -100,14 +100,16 @@ def scrape_texts(args):
             print(f"Data saved to: {output_path.absolute()}")
             
             # Show some statistics
-            transcription_count = texts_df['transcription'].notna().sum()
-            interlinear_count = texts_df['interlinear'].notna().sum()
-            spanish_count = texts_df['modern_spanish'].notna().sum()
-            
             print(f"\nContent statistics:")
-            print(f"- Documents with transcription: {transcription_count}")
-            print(f"- Documents with interlinear: {interlinear_count}")
-            print(f"- Documents with modern Spanish: {spanish_count}")
+            for column, label in [
+                ('transcription', 'transcription'),
+                ('interlinear', 'interlinear analysis'),
+                ('modern_spanish', 'modern Spanish'),
+                ('spanish_translation', 'Spanish translation'),
+                ('english_translation', 'English translation'),
+            ]:
+                if column in texts_df.columns:
+                    print(f"- Documents with {label}: {texts_df[column].notna().sum()}")
             
         finally:
             text_scraper.close()

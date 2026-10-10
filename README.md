@@ -103,6 +103,23 @@ The scraper extracts the following columns based on the Ticha website table stru
 - `trptn_status`: Transcription status
 - `legibility`: Legibility assessment
 
+### Text content (`texts` command)
+
+`ticha-scraper texts -i manuscripts.csv -o texts.csv` adds these columns to
+each manuscript row (empty when the site has no such text):
+
+- `transcription`: transcribed text, line breaks preserved
+- `interlinear`: interlinear analysis (glosses aligned with spaces)
+- `modern_spanish`: modern Spanish normalization
+- `spanish_translation`, `english_translation`: translations (featured texts)
+- metadata fields from the document page, e.g. `title`, `scribe`,
+  `document_type`, `call_number`, `date_digitized`, `town_modern_official`,
+  `primary_parties`, `witnesses`, `permission_file`
+
+Featured texts (`/en/text/<id>/<n>/`) are paginated: every page is visited,
+the texts are joined in order, metadata comes from their `overview` page, and
+`page_count` is added.
+
 ## Requirements
 
 - Python 3.9+
