@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 from .core.scraper import TichaScraper
 from .core.text_scraper import TichaTextScraper
+from .core.image_scraper import TichaImageScraper
 from .utils.citation import generate_citation_info
 import pandas as pd
 
@@ -119,6 +120,51 @@ def scrape_texts(args):
         sys.exit(1)
 
 
+def scrape_images(args):
+    """Download page images (DZI tiles stitched into single files)."""
+    print("Starting Ticha image scraper...")
+
+    if args.url:
+        df = pd.DataFrame({'document_link': [args.url]})
+    elif args.input and Path(args.input).exists():
+        df = pd.read_csv(args.input)
+        if 'document_link' not in df.columns:
+            print("Error: 'document_link' column not found in input file")
+            sys.exit(1)
+    else:
+        print("Error: provide --url or an existing --input CSV")
+        print("First run: ticha-scraper manuscripts -o manuscripts.csv")
+        sys.exit(1)
+
+    image_scraper = TichaImageScraper(rate_limit=args.rate_limit)
+
+    try:
+        results_df = image_scraper.download_images_from_dataframe(
+            df,
+            args.output_dir,
+            max_documents=args.max_docs,
+            image_format=args.format,
+            max_dimension=args.max_dimension,
+            make_pdf=args.pdf,
+            try_pdf=not args.skip_pdf,
+        )
+
+        output_path = Path(args.output)
+        results_df.to_csv(output_path, index=False)
+
+        total_images = int(results_df['image_count'].sum()) if not results_df.empty else 0
+        print(f"Downloaded {total_images} images from {len(results_df)} documents")
+        print(f"Images saved to: {Path(args.output_dir).absolute()}")
+        print(f"Index saved to: {output_path.absolute()}")
+
+    except KeyboardInterrupt:
+        print("\nScraping interrupted by user")
+        sys.exit(1)
+    except Exception as e:
+        print(f"Error: {e}")
+        sys.exit(1)
+
+
 def main():
     """Main CLI function."""
     parser = argparse.ArgumentParser(description='Scrape Ticha Colonial Zapotec manuscript data')
@@ -152,6 +198,31 @@ def main():
     texts_parser.add_argument('-v', '--verbose', action='store_true',
                             help='Enable verbose logging')
     
+    # Images command
+    images_parser = subparsers.add_parser('images', help='Download document page images (DZI)')
+    images_parser.add_argument('-i', '--input', type=str,
+                             help='Input CSV file with manuscript data (output from manuscripts command)')
+    images_parser.add_argument('-u', '--url', type=str,
+                             help='Download a single document page URL instead of a CSV')
+    images_parser.add_argument('-d', '--output-dir', type=str, default='ticha_images',
+                             help='Directory for downloaded images (default: ticha_images)')
+    images_parser.add_argument('-o', '--output', type=str, default='ticha_images.csv',
+                             help='Output CSV index of downloaded images (default: ticha_images.csv)')
+    images_parser.add_argument('-f', '--format', choices=['png', 'jpg', 'tif'], default='png',
+                             help='Output image format (default: png)')
+    images_parser.add_argument('--max-dimension', type=int, default=None,
+                             help='Limit the largest side of each image in pixels (default: full resolution)')
+    images_parser.add_argument('--pdf', action='store_true',
+                             help='Also bundle the pages of each document into a PDF')
+    images_parser.add_argument('--skip-pdf', action='store_true',
+                             help='Do not try the original PDF links first')
+    images_parser.add_argument('-r', '--rate-limit', type=float, default=2.0,
+                             help='Rate limit in seconds between documents (default: 2.0)')
+    images_parser.add_argument('--max-docs', type=int, default=None,
+                             help='Maximum number of documents to process (default: all)')
+    images_parser.add_argument('-v', '--verbose', action='store_true',
+                             help='Enable verbose logging')
+
     args = parser.parse_args()
     
     # Handle verbose logging
@@ -164,6 +235,8 @@ def main():
         scrape_manuscripts(args)
     elif args.command == 'texts':
         scrape_texts(args)
+    elif args.command == 'images':
+        scrape_images(args)
     else:
         parser.print_help()
         sys.exit(1)

@@ -249,7 +249,7 @@ class TichaTextScraper:
     
     def close(self):
         """Close the browser driver."""
-        if self.driver:
+        if getattr(self, "driver", None):
             self.driver.quit()
             self.driver = None
             logger.info("Text scraper browser driver closed")

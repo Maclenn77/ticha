@@ -53,6 +53,32 @@ ticha-scraper -o manuscripts.csv -v
 ticha-scraper -o manuscripts.csv --no-headless
 ```
 
+### Downloading page images
+
+The PDF links on Ticha can return `500 Internal Server Error`, so pages are
+rebuilt from the Deep Zoom Images (DZI) shown in the OpenSeadragon viewer:
+the scraper reads each `.dzi` descriptor, downloads the tiles of one pyramid
+level (`page_files/{level}/{col}_{row}.jpg`), and stitches them into a single
+image. The original PDF is tried first unless `--skip-pdf` is given.
+
+```bash
+# One document
+ticha-scraper images -u https://ticha.haverford.edu/en/texts/<doc>/ -d images
+
+# All documents from the manuscripts CSV, max 3000px per side, plus a PDF per document
+ticha-scraper images -i manuscripts.csv -d images --max-dimension 3000 --pdf
+```
+
+```python
+from ticha import TichaImageScraper
+
+scraper = TichaImageScraper(rate_limit=2.0)
+result = scraper.download_document_images(url, "images", image_format="png")
+print(result["image_paths"])
+```
+
+Images are written to `<output-dir>/<document>/page_001.png`, ...
+
 ## Data Structure
 
 The scraper extracts the following columns based on the Ticha website table structure:
