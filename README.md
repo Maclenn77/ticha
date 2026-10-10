@@ -53,6 +53,103 @@ ticha-scraper -o manuscripts.csv -v
 ticha-scraper -o manuscripts.csv --no-headless
 ```
 
+### Downloading page images
+
+The PDF links on Ticha return `500 Internal Server Error`, so pages are
+rebuilt from the Deep Zoom Images (DZI) shown in the OpenSeadragon viewer
+(`/images/dzi/<ticha_id>_<page>.dzi`): the scraper reads each descriptor,
+downloads the tiles of one pyramid level
+(`/images/dzi/<ticha_id>_<page>_files/{level}/{col}_{row}.jpg`) and stitches
+them into a single image. Both page layouts are supported:
+
+- `/en/texts/<id>/` (the `document_link` values from the manuscripts CSV):
+  pages come from the `data-pages` range used by `call_the_dragon.js`.
+- `/en/text/<id>/<n>/`: one image per page; every page is visited using the
+  `pageMap` embedded in the page.
+
+The original PDF is tried first (one attempt) unless `--skip-pdf` is given.
+
+```bash
+# One document
+ticha-scraper images -u https://ticha.haverford.edu/en/texts/Oc111/ -d images
+
+# All documents from the manuscripts CSV, max 3000px per side, plus a PDF per document
+ticha-scraper images -i manuscripts.csv -d images --max-dimension 3000 --pdf
+```
+
+```python
+from ticha import TichaImageScraper
+
+scraper = TichaImageScraper(rate_limit=2.0)
+result = scraper.download_document_images(url, "images", image_format="png")
+print(result["image_paths"])
+```
+
+Images are written to `<output-dir>/<document>/page_001.png`, ...
+
+### Line-level dataset for HTR (`lines` command)
+
+Segments the downloaded page images into lines with
+[kraken](https://kraken.re) and pairs each line with its transcription.
+
+```bash
+pip install 'ticha[lines]'   # installs kraken (and PyTorch)
+
+ticha-scraper texts  -i manuscripts.csv -o texts.csv
+ticha-scraper images -i manuscripts.csv -d images -o images.csv
+ticha-scraper lines  -t texts.csv -i images.csv -d dataset --export-lines
+```
+
+Steps:
+
+1. **Cleaning**: documents without a transcription are skipped, and by
+   default only `Completed and Checked` and `Completed but not Checked` are
+   kept (`-s STATUS` to choose, `-s all` for every status).
+2. **Segmentation**: kraken finds the baselines. Tiny or squeezed lines
+   (folio numbers, words inserted between lines) are kept as *fragments*
+   without text; lines are read top to bottom and left to right (signature
+   columns row by row, two-page spreads left page first).
+3. **Recognition**: a generic HTR model
+   ([McCATMuS](https://doi.org/10.5281/zenodo.13788177), downloaded on first
+   use; `--model` to change it) reads each line roughly. The reading is only
+   used to find which transcription line belongs to which image line.
+4. **Alignment**: image lines and transcription lines are aligned in order;
+   image lines may stay without text (stamped-paper headers, untranscribed
+   signatures) and transcription lines may stay without an image line. Each
+   pair gets a confidence `1 - CER` between reading and transcription
+   (`--cer-threshold`, default 0.5). Pages are aligned on their own when the
+   transcription's folio markers (`(8r)`, `[40r]`) match the image folios,
+   otherwise the whole document at once.
+5. **Sorting**: pages where every transcription line found a confident line
+   go to `auto/`. **Nothing is discarded**: every other page goes to
+   `review/`, pre-filled with the best alignment, with the transcription
+   lines assigned to it in a `.txt`. The reason is in `manifest.csv`.
+
+`--no-recognition` skips steps 3-4 and pairs lines in order (a page is
+accepted only when the line counts agree).
+
+Output:
+
+```
+dataset/
+├── manifest.csv            # one row per page: status, reason, line counts
+├── lines.csv               # one row per line: text, HTR reading, CER, confident
+├── auto/                   # PAGE XML + image, ready for training
+│   ├── Al714_page_001.png
+│   └── Al714_page_001.xml
+├── review/                 # PAGE XML + image + .txt for human correction
+├── lines/                  # with --export-lines: line_001.png + line_001.gt.txt
+│                           #   (every confident pair, also from review pages)
+├── segmentation/           # kraken caches: re-runs skip segmentation
+└── recognition/            #   and recognition
+```
+
+The PAGE XML (2019-07-15 schema) files can be imported into
+[eScriptorium](https://escriptorium.inria.fr) together with their images to
+review/correct them, and used to train a model with
+`ketos train -f page dataset/auto/*.xml`. The confidence of each pair is in
+`TextEquiv/@conf`.
+
 ## Data Structure
 
 The scraper extracts the following columns based on the Ticha website table structure:
@@ -68,6 +165,23 @@ The scraper extracts the following columns based on the Ticha website table stru
 - `language`: Language(s) of the document
 - `trptn_status`: Transcription status
 - `legibility`: Legibility assessment
+
+### Text content (`texts` command)
+
+`ticha-scraper texts -i manuscripts.csv -o texts.csv` adds these columns to
+each manuscript row (empty when the site has no such text):
+
+- `transcription`: transcribed text, line breaks preserved
+- `interlinear`: interlinear analysis (glosses aligned with spaces)
+- `modern_spanish`: modern Spanish normalization
+- `spanish_translation`, `english_translation`: translations (featured texts)
+- metadata fields from the document page, e.g. `title`, `scribe`,
+  `document_type`, `call_number`, `date_digitized`, `town_modern_official`,
+  `primary_parties`, `witnesses`, `permission_file`
+
+Featured texts (`/en/text/<id>/<n>/`) are paginated: every page is visited,
+the texts are joined in order, metadata comes from their `overview` page, and
+`page_count` is added.
 
 ## Requirements
 

@@ -5,6 +5,14 @@ import sys
 from pathlib import Path
 from .core.scraper import TichaScraper
 from .core.text_scraper import TichaTextScraper
+from .core.image_scraper import TichaImageScraper
+from .core.line_pairing import (
+    DEFAULT_MODEL,
+    DEFAULT_STATUSES,
+    KrakenRecognizer,
+    KrakenSegmenter,
+    LinePairer,
+)
 from .utils.citation import generate_citation_info
 import pandas as pd
 
@@ -99,14 +107,16 @@ def scrape_texts(args):
             print(f"Data saved to: {output_path.absolute()}")
             
             # Show some statistics
-            transcription_count = texts_df['transcription'].notna().sum()
-            interlinear_count = texts_df['interlinear'].notna().sum()
-            spanish_count = texts_df['modern_spanish'].notna().sum()
-            
             print(f"\nContent statistics:")
-            print(f"- Documents with transcription: {transcription_count}")
-            print(f"- Documents with interlinear: {interlinear_count}")
-            print(f"- Documents with modern Spanish: {spanish_count}")
+            for column, label in [
+                ('transcription', 'transcription'),
+                ('interlinear', 'interlinear analysis'),
+                ('modern_spanish', 'modern Spanish'),
+                ('spanish_translation', 'Spanish translation'),
+                ('english_translation', 'English translation'),
+            ]:
+                if column in texts_df.columns:
+                    print(f"- Documents with {label}: {texts_df[column].notna().sum()}")
             
         finally:
             text_scraper.close()
@@ -117,6 +127,100 @@ def scrape_texts(args):
     except Exception as e:
         print(f"Error: {e}")
         sys.exit(1)
+
+
+def scrape_images(args):
+    """Download page images (DZI tiles stitched into single files)."""
+    print("Starting Ticha image scraper...")
+
+    if args.url:
+        df = pd.DataFrame({'document_link': [args.url]})
+    elif args.input and Path(args.input).exists():
+        df = pd.read_csv(args.input)
+        if 'document_link' not in df.columns:
+            print("Error: 'document_link' column not found in input file")
+            sys.exit(1)
+    else:
+        print("Error: provide --url or an existing --input CSV")
+        print("First run: ticha-scraper manuscripts -o manuscripts.csv")
+        sys.exit(1)
+
+    image_scraper = TichaImageScraper(rate_limit=args.rate_limit)
+
+    try:
+        results_df = image_scraper.download_images_from_dataframe(
+            df,
+            args.output_dir,
+            max_documents=args.max_docs,
+            image_format=args.format,
+            max_dimension=args.max_dimension,
+            make_pdf=args.pdf,
+            try_pdf=not args.skip_pdf,
+        )
+
+        output_path = Path(args.output)
+        results_df.to_csv(output_path, index=False)
+
+        total_images = int(results_df['image_count'].sum()) if not results_df.empty else 0
+        print(f"Downloaded {total_images} images from {len(results_df)} documents")
+        print(f"Images saved to: {Path(args.output_dir).absolute()}")
+        print(f"Index saved to: {output_path.absolute()}")
+
+    except KeyboardInterrupt:
+        print("\nScraping interrupted by user")
+        sys.exit(1)
+    except Exception as e:
+        print(f"Error: {e}")
+        sys.exit(1)
+
+
+def pair_lines(args):
+    """Segment page images into lines and pair them with transcriptions."""
+    print("Starting line segmentation and pairing...")
+
+    for path in (args.texts, args.images):
+        if not Path(path).exists():
+            print(f"Error: Input file {path} not found")
+            sys.exit(1)
+
+    statuses = None if 'all' in (args.status or []) else (args.status or DEFAULT_STATUSES)
+    output_dir = Path(args.output_dir)
+
+    try:
+        segmenter = KrakenSegmenter(cache_dir=output_dir / "segmentation", device=args.device)
+        recognizer = None
+        if not args.no_recognition:
+            recognizer = KrakenRecognizer(
+                args.model, cache_dir=output_dir / "recognition", device=args.device)
+    except (ImportError, FileNotFoundError) as e:
+        print(f"Error: {e}")
+        sys.exit(1)
+
+    pairer = LinePairer(
+        segmenter=segmenter,
+        recognizer=recognizer,
+        statuses=statuses,
+        split_columns=not args.no_split_columns,
+        cer_threshold=args.cer_threshold,
+        export_lines=args.export_lines,
+    )
+
+    try:
+        manifest = pairer.run(args.texts, args.images, output_dir, max_documents=args.max_docs)
+    except KeyboardInterrupt:
+        print("\nInterrupted by user (finished pages are cached and kept)")
+        sys.exit(1)
+
+    counts = manifest['status'].value_counts().to_dict() if not manifest.empty else {}
+    print(f"\nPages paired automatically: {counts.get('auto', 0)}  -> {output_dir / 'auto'}")
+    print(f"Pages for human review:     {counts.get('review', 0)}  -> {output_dir / 'review'}")
+    print(f"Documents skipped:          {counts.get('skipped', 0)}")
+    if counts.get('error'):
+        print(f"Pages with errors:          {counts['error']}")
+    if not manifest.empty and 'confident_lines' in manifest:
+        print(f"Confident line pairs:       {int(manifest['confident_lines'].sum())} "
+              f"of {int(manifest['paired_lines'].sum())} paired")
+    print(f"Manifest: {(output_dir / 'manifest.csv').absolute()}")
 
 
 def main():
@@ -152,6 +256,61 @@ def main():
     texts_parser.add_argument('-v', '--verbose', action='store_true',
                             help='Enable verbose logging')
     
+    # Images command
+    images_parser = subparsers.add_parser('images', help='Download document page images (DZI)')
+    images_parser.add_argument('-i', '--input', type=str,
+                             help='Input CSV file with manuscript data (output from manuscripts command)')
+    images_parser.add_argument('-u', '--url', type=str,
+                             help='Download a single document page URL instead of a CSV')
+    images_parser.add_argument('-d', '--output-dir', type=str, default='ticha_images',
+                             help='Directory for downloaded images (default: ticha_images)')
+    images_parser.add_argument('-o', '--output', type=str, default='ticha_images.csv',
+                             help='Output CSV index of downloaded images (default: ticha_images.csv)')
+    images_parser.add_argument('-f', '--format', choices=['png', 'jpg', 'tif'], default='png',
+                             help='Output image format (default: png)')
+    images_parser.add_argument('--max-dimension', type=int, default=None,
+                             help='Limit the largest side of each image in pixels (default: full resolution)')
+    images_parser.add_argument('--pdf', action='store_true',
+                             help='Also bundle the pages of each document into a PDF')
+    images_parser.add_argument('--skip-pdf', action='store_true',
+                             help='Do not try the original PDF links first')
+    images_parser.add_argument('-r', '--rate-limit', type=float, default=2.0,
+                             help='Rate limit in seconds between documents (default: 2.0)')
+    images_parser.add_argument('--max-docs', type=int, default=None,
+                             help='Maximum number of documents to process (default: all)')
+    images_parser.add_argument('-v', '--verbose', action='store_true',
+                             help='Enable verbose logging')
+
+    # Lines command
+    lines_parser = subparsers.add_parser(
+        'lines', help='Segment images into lines and pair them with transcriptions (kraken)')
+    lines_parser.add_argument('-t', '--texts', type=str, required=True,
+                            help='CSV from the texts command')
+    lines_parser.add_argument('-i', '--images', type=str, required=True,
+                            help='CSV from the images command')
+    lines_parser.add_argument('-d', '--output-dir', type=str, default='ticha_lines',
+                            help='Output directory (default: ticha_lines)')
+    lines_parser.add_argument('-s', '--status', action='append',
+                            help='Transcription status to keep; repeat for several, or "all" '
+                                 '(default: "Completed and Checked" and "Completed but not Checked")')
+    lines_parser.add_argument('--model', type=str, default=DEFAULT_MODEL,
+                            help='kraken recognition model (path or DOI) used to align lines '
+                                 f'with the transcription (default: McCATMuS, {DEFAULT_MODEL})')
+    lines_parser.add_argument('--no-recognition', action='store_true',
+                            help='Pair lines in order instead (pages need equal line counts)')
+    lines_parser.add_argument('--cer-threshold', type=float, default=0.5,
+                            help='Highest character error rate for a confident pair (default: 0.5)')
+    lines_parser.add_argument('--export-lines', action='store_true',
+                            help='Also write line images + .gt.txt of confidently paired lines')
+    lines_parser.add_argument('--no-split-columns', action='store_true',
+                            help='Do not split transcription lines on runs of 4+ spaces')
+    lines_parser.add_argument('--device', type=str, default='cpu',
+                            help='Device for kraken, e.g. cpu or cuda:0 (default: cpu)')
+    lines_parser.add_argument('--max-docs', type=int, default=None,
+                            help='Maximum number of documents to process (default: all)')
+    lines_parser.add_argument('-v', '--verbose', action='store_true',
+                            help='Enable verbose logging')
+
     args = parser.parse_args()
     
     # Handle verbose logging
@@ -164,6 +323,10 @@ def main():
         scrape_manuscripts(args)
     elif args.command == 'texts':
         scrape_texts(args)
+    elif args.command == 'images':
+        scrape_images(args)
+    elif args.command == 'lines':
+        pair_lines(args)
     else:
         parser.print_help()
         sys.exit(1)

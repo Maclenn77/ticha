@@ -1,184 +1,237 @@
-"""Tests for the Ticha text scraper."""
+"""Tests for the Ticha text scraper (offline; markup mirrors the live site)."""
 
-import pytest
+from unittest.mock import Mock
+
 import pandas as pd
-from unittest.mock import Mock, patch, MagicMock
-from selenium.common.exceptions import NoSuchElementException
+import pytest
+from bs4 import BeautifulSoup
 
-from ticha.core.text_scraper import TichaTextScraper
+from ticha.core.text_scraper import TichaTextScraper, element_to_text
+
+BASE = "https://ticha.haverford.edu"
+
+METADATA_HTML = """
+<div role="tabpanel" class="tab-pane active" id="metadata">
+  <br>
+  <p>
+  <span class="meta-title">Title</span>
+    Translation of Bill of Sale from San Jerónimo Tlacochahuaya, 1675
+  </p>
+  <p>
+  <span class="meta-title">Document Type</span>
+    <a href="/en/texts/doc_type/Bill of Sale" target="_blank">Bill of Sale</a>
+  </p>
+  <p>
+  <span class="meta-title">Town (Modern Official)</span>
+    San Jerónimo Tlacochahuaya
+  </p>
+  <p>
+  <span class="meta-title">Witnesses</span>
+
+    Marcos Pérez, Ignacio Martín (alcalde)
+
+  </p>
+  <p>
+  <span class="meta-title">Permission File</span>
+    <a href="http://ticha.haverford.edu/images/permissions/AGEO.pdf">[PDF]</a>
+  </p>
+</div>
+"""
+
+# /en/texts/<id>/ layout: transcription as raw text + <br/>
+HANDWRITTEN_HTML = METADATA_HTML + """
+<div role="tabpanel" class="tab-pane" id="transcription">
+
+  (8r) <br/>
+  Yo Pedro Andres Principal y natural de este Pueb de Tlacochahuaya<br/>
+  oy Jueves a catorze de Marzo<br/>
+
+</div>
+<div role="tabpanel" class="tab-pane" id="interlinear">
+  <p>This document does not currently have an interlinear analysis available.</p>
+</div>
+<div role="tabpanel" class="tab-pane" id="modern_spanish">
+  <p>This document does not currently have a modern Spanish normalization
+  available.</p>
+</div>
+"""
+
+# /en/text/<id>/<n>/ layout: one page per URL, pageMap lists the pages
+FEATURED_PAGE_HTML = """
+<div id="transcription-tab" class="tab-pane active">[{folio}]
+Rinij naa Beni gichij
+lo geche San Matheo</div>
+<div id="normalized-spanish-tab" class="tab-pane"></div>
+<div id="spanish-translation-tab" class="tab-pane"></div>
+<div id="english-translation-tab" class="tab-pane">Page {folio} in English</div>
+<div id="analysis-tab" class="tab-pane"><p>{folio}-1. Rinij naa</p>
+<p>Ri-nij&nbsp;&nbsp;&nbsp;&nbsp;naa</p>
+<p><em>Say I</em></p></div>
+<script>
+const pageMap = {{"01r": "0", "01v": "1"}} // get the pageMap from the model
+</script>
+"""
 
 
-class TestTichaTextScraper:
-    """Test cases for TichaTextScraper class."""
-    
-    @pytest.fixture
-    def text_scraper(self):
-        """Create a text scraper instance for testing."""
-        return TichaTextScraper(rate_limit=0.1)
-    
-    @pytest.fixture
-    def mock_driver(self):
-        """Create a mock WebDriver."""
-        driver = Mock()
-        return driver
-    
-    def test_init(self, text_scraper):
-        """Test text scraper initialization."""
-        assert text_scraper.rate_limit == 0.1
-        assert text_scraper.base_url == "https://ticha.haverford.edu"
-        assert text_scraper.driver is None
-    
-    def test_normalize_metadata_key(self, text_scraper):
-        """Test metadata key normalization."""
-        test_cases = [
-            ("Title", "title"),
-            ("Call Number", "call_number"),
-            ("Date Digitized", "date_digitized"),
-            ("Town (Modern Official)", "town_modern_official"),
-            ("Primary Parties", "primary_parties"),
-            ("Permission File", "permission_file"),
-        ]
-        
-        for input_key, expected in test_cases:
-            result = text_scraper._normalize_metadata_key(input_key)
-            assert result == expected
-    
-    def test_extract_metadata(self, text_scraper, mock_driver):
-        """Test metadata extraction."""
-        text_scraper.driver = mock_driver
-        
-        # Mock metadata div with p tags
-        mock_metadata_div = Mock()
-        mock_p_tags = []
-        
-        # Create mock p tags with metadata
-        metadata_texts = [
-            "Title: Test Document",
-            "Archive: Test Archive",
-            "Call Number: 123-ABC",
-            "Date Digitized: 2023-01-01"
-        ]
-        
-        for text in metadata_texts:
-            mock_p = Mock()
-            mock_p.text = text
-            mock_p_tags.append(mock_p)
-        
-        mock_metadata_div.find_elements.return_value = mock_p_tags
-        mock_driver.find_element.return_value = mock_metadata_div
-        
-        result = text_scraper._extract_metadata()
-        
-        expected = {
-            'title': 'Test Document',
-            'archive': 'Test Archive', 
-            'call_number': '123-ABC',
-            'date_digitized': '2023-01-01'
-        }
-        
-        assert result == expected
-    
-    def test_extract_metadata_no_div(self, text_scraper, mock_driver):
-        """Test metadata extraction when div doesn't exist."""
-        text_scraper.driver = mock_driver
-        mock_driver.find_element.side_effect = NoSuchElementException()
-        
-        result = text_scraper._extract_metadata()
-        assert result == {}
-    
-    def test_extract_text_content(self, text_scraper, mock_driver):
-        """Test text content extraction."""
-        text_scraper.driver = mock_driver
-        
-        # Mock div with p tags
-        mock_div = Mock()
-        mock_p_tags = []
-        
-        # Create mock p tags with text content
-        text_contents = [
-            "First paragraph of text.",
-            "Second paragraph of text.",
-            "Third paragraph of text."
-        ]
-        
-        for text in text_contents:
-            mock_p = Mock()
-            mock_p.text = text
-            mock_p_tags.append(mock_p)
-        
-        mock_div.find_elements.return_value = mock_p_tags
-        mock_driver.find_element.return_value = mock_div
-        
-        result = text_scraper._extract_text_content("transcription")
-        
-        expected = "First paragraph of text.\n\nSecond paragraph of text.\n\nThird paragraph of text."
-        assert result == expected
-    
-    def test_extract_text_content_no_div(self, text_scraper, mock_driver):
-        """Test text content extraction when div doesn't exist."""
-        text_scraper.driver = mock_driver
-        mock_driver.find_element.side_effect = NoSuchElementException()
-        
-        result = text_scraper._extract_text_content("nonexistent")
-        assert result is None
-    
-    def test_scrape_document_structure(self, text_scraper, mock_driver):
-        """Test document scraping structure."""
-        text_scraper.driver = mock_driver
-        
-        # Mock successful page load
-        with patch('ticha.core.text_scraper.WebDriverWait'):
-            # Mock metadata extraction
-            with patch.object(text_scraper, '_extract_metadata') as mock_metadata:
-                mock_metadata.return_value = {'title': 'Test Doc', 'archive': 'Test Archive'}
-                
-                # Mock text content extraction
-                with patch.object(text_scraper, '_extract_text_content') as mock_text:
-                    mock_text.side_effect = lambda div_id: f"Content from {div_id}" if div_id == "transcription" else None
-                    
-                    result = text_scraper.scrape_document("https://example.com/doc")
-                    
-                    assert 'url' in result
-                    assert 'transcription' in result
-                    assert 'interlinear' in result
-                    assert 'modern_spanish' in result
-                    assert 'title' in result
-                    assert 'archive' in result
-                    assert result['title'] == 'Test Doc'
-                    assert result['transcription'] == 'Content from transcription'
-    
-    def test_scrape_documents_from_dataframe(self, text_scraper):
-        """Test scraping multiple documents from DataFrame."""
-        # Create test DataFrame
-        test_data = {
-            'document_name': ['Doc 1', 'Doc 2', 'Doc 3'],
-            'document_link': ['https://example.com/1', 'https://example.com/2', None],
-            'ticha_id': ['ID1', 'ID2', 'ID3']
-        }
-        df = pd.DataFrame(test_data)
-        
-        # Mock the scrape_document method
-        with patch.object(text_scraper, 'scrape_document') as mock_scrape:
-            mock_scrape.side_effect = [
-                {'url': 'https://example.com/1', 'title': 'Title 1', 'transcription': 'Text 1'},
-                {'url': 'https://example.com/2', 'title': 'Title 2', 'transcription': 'Text 2'}
-            ]
-            
-            with patch.object(text_scraper, '_setup_driver'):
-                result_df = text_scraper.scrape_documents_from_dataframe(df)
-        
-        # Should only process 2 documents (excluding the one with None link)
-        assert len(result_df) == 2
-        assert 'document_name' in result_df.columns  # Original columns preserved
-        assert 'title' in result_df.columns  # New metadata added
-        assert 'transcription' in result_df.columns  # New content added
-    
-    def test_close(self, text_scraper):
-        """Test browser cleanup."""
-        mock_driver = Mock()
-        text_scraper.driver = mock_driver
-        
-        text_scraper.close()
-        
-        mock_driver.quit.assert_called_once()
-        assert text_scraper.driver is None
+def fake_session(pages):
+    session = Mock()
+    session.headers = {}
+
+    def get(url, timeout=None):
+        response = Mock()
+        response.status_code = 200 if url in pages else 404
+        response.content = pages.get(url, "").encode()
+        return response
+
+    session.get.side_effect = get
+    return session
+
+
+@pytest.fixture
+def text_scraper():
+    return TichaTextScraper(rate_limit=0)
+
+
+def test_init(text_scraper):
+    assert text_scraper.rate_limit == 0
+    assert text_scraper.base_url == BASE
+
+
+def test_normalize_metadata_key(text_scraper):
+    test_cases = [
+        ("Title", "title"),
+        ("Call Number", "call_number"),
+        ("Date Digitized", "date_digitized"),
+        ("Town (Modern Official)", "town_modern_official"),
+        ("Primary Parties", "primary_parties"),
+        ("Permission File", "permission_file"),
+    ]
+    for input_key, expected in test_cases:
+        assert text_scraper._normalize_metadata_key(input_key) == expected
+
+
+def test_extract_metadata(text_scraper):
+    soup = BeautifulSoup(METADATA_HTML, "html.parser")
+    assert text_scraper._extract_metadata(soup, f"{BASE}/en/texts/Tl675aT/") == {
+        "title": "Translation of Bill of Sale from San Jerónimo Tlacochahuaya, 1675",
+        "document_type": "Bill of Sale",
+        "town_modern_official": "San Jerónimo Tlacochahuaya",
+        "witnesses": "Marcos Pérez, Ignacio Martín (alcalde)",
+        "permission_file": "http://ticha.haverford.edu/images/permissions/AGEO.pdf",
+    }
+
+
+def test_extract_metadata_colon_format(text_scraper):
+    soup = BeautifulSoup(
+        '<div id="metadata"><p>Title: Test Document</p><p>Archive: AGEO</p></div>',
+        "html.parser",
+    )
+    assert text_scraper._extract_metadata(soup) == {
+        "title": "Test Document",
+        "archive": "AGEO",
+    }
+
+
+def test_extract_metadata_no_div(text_scraper):
+    soup = BeautifulSoup("<div id='other'></div>", "html.parser")
+    assert text_scraper._extract_metadata(soup) == {}
+
+
+def test_text_with_br_lines():
+    soup = BeautifulSoup(HANDWRITTEN_HTML, "html.parser")
+    assert element_to_text(soup.find(id="transcription")) == (
+        "(8r)\n"
+        "Yo Pedro Andres Principal y natural de este Pueb de Tlacochahuaya\n"
+        "oy Jueves a catorze de Marzo"
+    )
+
+
+def test_text_with_p_and_br():
+    soup = BeautifulSoup(
+        "<div id='t'><p>\n  +\n  <br/>\n  Niateni queacani\n  <br/>\n  ua nayo"
+        "</p><p>segundo</p></div>",
+        "html.parser",
+    )
+    assert element_to_text(soup.div) == "+\nNiateni queacani\nua nayo\n\nsegundo"
+
+
+def test_text_plain_lines_and_nbsp_alignment():
+    soup = BeautifulSoup(FEATURED_PAGE_HTML.format(folio="1r"), "html.parser")
+    assert element_to_text(soup.find(id="transcription-tab")) == (
+        "[1r]\nRinij naa Beni gichij\nlo geche San Matheo"
+    )
+    assert element_to_text(soup.find(id="analysis-tab")) == (
+        "1r-1. Rinij naa\n\nRi-nij    naa\n\nSay I"
+    )
+
+
+def test_placeholders_and_empty_become_none(text_scraper):
+    soup = BeautifulSoup(HANDWRITTEN_HTML, "html.parser")
+    assert text_scraper._extract_text_content(soup, "interlinear") is None
+    assert text_scraper._extract_text_content(soup, "modern_spanish") is None
+    assert text_scraper._extract_text_content(soup, "missing") is None
+    empty = BeautifulSoup('<div id="x" class="tab-pane"></div>', "html.parser")
+    assert text_scraper._extract_text_content(empty, "x") is None
+
+
+def test_scrape_handwritten_document():
+    url = f"{BASE}/en/texts/Tl675aT/"
+    scraper = TichaTextScraper(
+        rate_limit=0, session=fake_session({url: HANDWRITTEN_HTML})
+    )
+    result = scraper.scrape_document("/en/texts/Tl675aT/")
+    assert result["url"] == url
+    assert result["transcription"].startswith("(8r)\nYo Pedro Andres")
+    assert result["interlinear"] is None
+    assert result["modern_spanish"] is None
+    assert result["english_translation"] is None
+    assert result["title"].startswith("Translation of Bill of Sale")
+
+
+def test_scrape_featured_document_joins_pages():
+    text = f"{BASE}/en/text/Ma733/"
+    pages = {
+        f"{text}overview/": METADATA_HTML,
+        f"{text}0/": FEATURED_PAGE_HTML.format(folio="1r"),
+        f"{text}1/": FEATURED_PAGE_HTML.format(folio="1v"),
+    }
+    scraper = TichaTextScraper(rate_limit=0, session=fake_session(pages))
+    result = scraper.scrape_document(f"{text}0/")
+    assert "error" not in result
+    assert result["page_count"] == 2
+    assert result["transcription"].startswith("[1r]\nRinij")
+    assert "\n\n[1v]\nRinij" in result["transcription"]
+    assert result["english_translation"] == "Page 1r in English\n\nPage 1v in English"
+    assert result["interlinear"].startswith("1r-1. Rinij naa")
+    assert result["modern_spanish"] is None
+    assert result["title"].startswith("Translation of Bill of Sale")
+
+
+def test_scrape_document_http_error():
+    scraper = TichaTextScraper(rate_limit=0, session=fake_session({}))
+    result = scraper.scrape_document("/en/texts/Missing/")
+    assert "error" in result
+
+
+def test_scrape_documents_from_dataframe():
+    pages = {
+        f"{BASE}/en/texts/A1/": HANDWRITTEN_HTML,
+        f"{BASE}/en/texts/A2/": HANDWRITTEN_HTML,
+    }
+    scraper = TichaTextScraper(rate_limit=0, session=fake_session(pages))
+    df = pd.DataFrame({
+        "document_name": ["Doc 1", "Doc 2", "No link"],
+        "document_link": ["/en/texts/A1/", "/en/texts/A2/", None],
+    })
+    result_df = scraper.scrape_documents_from_dataframe(df)
+    assert len(result_df) == 2
+    assert "document_name" in result_df.columns  # Original columns preserved
+    assert "title" in result_df.columns  # New metadata added
+    assert result_df["transcription"].notna().all()
+
+
+def test_close():
+    session = Mock()
+    session.headers = {}
+    TichaTextScraper(session=session).close()
+    session.close.assert_called_once()
