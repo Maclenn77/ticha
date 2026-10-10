@@ -150,6 +150,44 @@ review/correct them, and used to train a model with
 `ketos train -f page dataset/auto/*.xml`. The confidence of each pair is in
 `TextEquiv/@conf`.
 
+### Data augmentation (`augment` command)
+
+Augments the confidently paired line images written by
+`lines --export-lines`. Each augmented image keeps the transcription it was
+paired with; nothing is segmented or aligned again.
+
+```bash
+ticha-scraper lines   -t texts.csv -i images.csv -d dataset --export-lines
+ticha-scraper augment -d dataset -o augmented -n 4 --seed 1
+```
+
+Two kinds of copies (`--degrade-ratio`, default half and half):
+
+- **degrade**: imitates Ticha's untranscribed manuscripts, so a model trained
+  on the transcribed ones transfers to them. Measured on a sample of
+  untranscribed pages (mostly the Santo Domingo Etla notarial series), those
+  scans are about 0.6x the resolution (~1450 px wide), almost grey with a
+  cool cast and faded brown ink, and mostly washed out (paper ~220) or
+  sometimes underexposed (dark grey, low contrast; `--underexposed-ratio`),
+  with uneven lighting and stains. With `--target DIR` the tone, colour and
+  resolution of real low-quality images in `DIR` are imitated instead of
+  the built-in ranges.
+- **variety**: brightness, contrast, gamma, warm/cool paper, ink weight,
+  blur, noise, JPEG compression, small rotation, slant, scale and elastic
+  distortion (`--no-geometry` to disable the geometric ones).
+
+Output: `augmented/lines/<page>/line_NNN_augKK.png` + `.gt.txt` (same format
+as `lines/`) and `augment.csv` with the parameters of every copy. The white
+area outside each line's polygon stays white, as in the original crops.
+
+Lines of `review/` pages are used too when they were paired confidently
+(`--min-conf`, default 0.5); `--auto-only` restricts to `auto/` pages.
+`--pages` also augments whole pages as PAGE XML + image (reusing the paired
+lines and transforming their coordinates), e.g. to train segmentation.
+
+Split train/validation/test **by document before augmenting**, so copies of
+the same line never end up on both sides.
+
 ## Data Structure
 
 The scraper extracts the following columns based on the Ticha website table structure:
