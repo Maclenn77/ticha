@@ -157,7 +157,21 @@ def _js_object_to_json(block: str) -> str:
 
 def _page_range_to_list(pages: str) -> List[str]:
     """
-    Expand a Ticha ``data-pages`` value exactly like ``call_the_dragon.js``.
+    Expand a Ticha ``data-pages`` value: ranges and comma-separated parts.
+
+    ``"788-789, 791"`` -> ``["788", "789", "791"]``. (Ticha's own viewer
+    ignores everything after the comma, but those images exist.)
+    """
+    result: List[str] = []
+    for part in pages.split(","):
+        if part.strip():
+            result.extend(_expand_page_range(part))
+    return result
+
+
+def _expand_page_range(pages: str) -> List[str]:
+    """
+    Expand one ``data-pages`` range exactly like ``call_the_dragon.js``.
 
     ``"09r-10v"`` -> ``["9r", "9v", "10r", "10v"]``; ``"1-3"`` -> ``["1", "2", "3"]``.
     A single page is kept verbatim. As in the JS, ranges go through

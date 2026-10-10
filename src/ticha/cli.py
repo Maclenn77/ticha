@@ -6,6 +6,7 @@ from pathlib import Path
 from .core.scraper import TichaScraper
 from .core.text_scraper import TichaTextScraper
 from .core.image_scraper import TichaImageScraper
+from .core.line_pairing import DEFAULT_STATUSES, KrakenSegmenter, LinePairer
 from .utils.citation import generate_citation_info
 import pandas as pd
 
@@ -167,6 +168,46 @@ def scrape_images(args):
         sys.exit(1)
 
 
+def pair_lines(args):
+    """Segment page images into lines and pair them with transcriptions."""
+    print("Starting line segmentation and pairing...")
+
+    for path in (args.texts, args.images):
+        if not Path(path).exists():
+            print(f"Error: Input file {path} not found")
+            sys.exit(1)
+
+    statuses = None if 'all' in (args.status or []) else (args.status or DEFAULT_STATUSES)
+    output_dir = Path(args.output_dir)
+
+    try:
+        segmenter = KrakenSegmenter(cache_dir=output_dir / "segmentation", device=args.device)
+    except ImportError as e:
+        print(f"Error: {e}")
+        sys.exit(1)
+
+    pairer = LinePairer(
+        segmenter=segmenter,
+        statuses=statuses,
+        split_columns=not args.no_split_columns,
+        export_lines=args.export_lines,
+    )
+
+    try:
+        manifest = pairer.run(args.texts, args.images, output_dir, max_documents=args.max_docs)
+    except KeyboardInterrupt:
+        print("\nInterrupted by user (finished pages are cached and kept)")
+        sys.exit(1)
+
+    counts = manifest['status'].value_counts().to_dict() if not manifest.empty else {}
+    print(f"\nPages paired automatically: {counts.get('auto', 0)}  -> {output_dir / 'auto'}")
+    print(f"Pages for human review:     {counts.get('review', 0)}  -> {output_dir / 'review'}")
+    print(f"Documents skipped:          {counts.get('skipped', 0)}")
+    if counts.get('error'):
+        print(f"Pages with errors:          {counts['error']}")
+    print(f"Manifest: {(output_dir / 'manifest.csv').absolute()}")
+
+
 def main():
     """Main CLI function."""
     parser = argparse.ArgumentParser(description='Scrape Ticha Colonial Zapotec manuscript data')
@@ -225,6 +266,29 @@ def main():
     images_parser.add_argument('-v', '--verbose', action='store_true',
                              help='Enable verbose logging')
 
+    # Lines command
+    lines_parser = subparsers.add_parser(
+        'lines', help='Segment images into lines and pair them with transcriptions (kraken)')
+    lines_parser.add_argument('-t', '--texts', type=str, required=True,
+                            help='CSV from the texts command')
+    lines_parser.add_argument('-i', '--images', type=str, required=True,
+                            help='CSV from the images command')
+    lines_parser.add_argument('-d', '--output-dir', type=str, default='ticha_lines',
+                            help='Output directory (default: ticha_lines)')
+    lines_parser.add_argument('-s', '--status', action='append',
+                            help='Transcription status to keep; repeat for several, or "all" '
+                                 '(default: "Completed and Checked" and "Completed but not Checked")')
+    lines_parser.add_argument('--export-lines', action='store_true',
+                            help='Also write line images + .gt.txt for automatically paired pages')
+    lines_parser.add_argument('--no-split-columns', action='store_true',
+                            help='Do not split transcription lines on runs of 4+ spaces')
+    lines_parser.add_argument('--device', type=str, default='cpu',
+                            help='Device for kraken, e.g. cpu or cuda:0 (default: cpu)')
+    lines_parser.add_argument('--max-docs', type=int, default=None,
+                            help='Maximum number of documents to process (default: all)')
+    lines_parser.add_argument('-v', '--verbose', action='store_true',
+                            help='Enable verbose logging')
+
     args = parser.parse_args()
     
     # Handle verbose logging
@@ -239,6 +303,8 @@ def main():
         scrape_texts(args)
     elif args.command == 'images':
         scrape_images(args)
+    elif args.command == 'lines':
+        pair_lines(args)
     else:
         parser.print_help()
         sys.exit(1)

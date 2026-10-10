@@ -235,6 +235,7 @@ const pageMap = {"01r": "0", "01v": "1"} // get the pageMap from the model
         ("1v-2r", ["1v", "2r"]),
         ("3-5", ["3", "4", "5"]),
         ("09r", ["09r"]),
+        ("788-789, 791", ["788", "789", "791"]),
     ],
 )
 def test_page_range_matches_call_the_dragon(pages, expected):

@@ -87,6 +87,52 @@ print(result["image_paths"])
 
 Images are written to `<output-dir>/<document>/page_001.png`, ...
 
+### Line-level dataset for HTR (`lines` command)
+
+Segments the downloaded page images into lines with
+[kraken](https://kraken.re) and pairs each line with its transcription.
+
+```bash
+pip install 'ticha[lines]'   # installs kraken (and PyTorch)
+
+ticha-scraper texts  -i manuscripts.csv -o texts.csv
+ticha-scraper images -i manuscripts.csv -d images -o images.csv
+ticha-scraper lines  -t texts.csv -i images.csv -d dataset --export-lines
+```
+
+Steps:
+
+1. **Cleaning**: documents without a transcription are skipped, and by
+   default only `Completed and Checked` and `Completed but not Checked` are
+   kept (`-s STATUS` to choose, `-s all` for every status).
+2. **Pages**: the transcription is split on its folio markers (`(8r)`,
+   `[40r]`, `(446)`) and matched with the page images in order.
+3. **Lines**: kraken finds the baselines; tiny or squeezed lines (folio
+   numbers, words inserted between lines) are kept as *fragments* without
+   text; lines are read top to bottom and left to right (signature columns
+   row by row), matching how Ticha lays out the transcription with spaces.
+4. **Pairing**: when the number of lines and transcription lines agree, the
+   page goes to `auto/`. Otherwise **nothing is discarded**: the page goes
+   to `review/`, pre-filled in order, with its transcription in a `.txt`.
+
+Output:
+
+```
+dataset/
+├── manifest.csv            # one row per page: status, reason, line counts
+├── auto/                   # PAGE XML + image, ready for training
+│   ├── Tl675a_page_001.png
+│   └── Tl675a_page_001.xml
+├── review/                 # PAGE XML + image + .txt for human correction
+├── lines/                  # with --export-lines: line_001.png + line_001.gt.txt
+└── segmentation/           # kraken cache (re-runs skip segmentation)
+```
+
+The PAGE XML (2019-07-15 schema) files can be imported into
+[eScriptorium](https://escriptorium.inria.fr) together with their images to
+review/correct them, and used to train a model with
+`ketos train -f page dataset/auto/*.xml`.
+
 ## Data Structure
 
 The scraper extracts the following columns based on the Ticha website table structure:
