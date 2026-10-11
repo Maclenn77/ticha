@@ -6,6 +6,7 @@ from pathlib import Path
 from .core.scraper import TichaScraper
 from .core.text_scraper import TichaTextScraper
 from .core.image_scraper import TichaImageScraper
+from .core.augmentation import Augmenter, DatasetAugmenter, load_targets
 from .core.line_pairing import (
     DEFAULT_MODEL,
     DEFAULT_STATUSES,
@@ -223,6 +224,46 @@ def pair_lines(args):
     print(f"Manifest: {(output_dir / 'manifest.csv').absolute()}")
 
 
+def augment_dataset(args):
+    """Augment the line dataset (pages and line crops)."""
+    print("Starting data augmentation...")
+    dataset = Path(args.dataset)
+    if not (dataset / "auto").exists():
+        print(f"Error: {dataset} does not look like a 'lines' output (no auto/ folder)")
+        sys.exit(1)
+
+    targets = None
+    if args.target:
+        targets = load_targets(args.target)
+        print(f"Imitating {len(targets)} target image(s) from {args.target}")
+        if not targets:
+            print("Error: no images found in --target")
+            sys.exit(1)
+
+    augmenter = DatasetAugmenter(
+        Augmenter(targets=targets, seed=args.seed,
+                  underexposed_ratio=args.underexposed_ratio),
+        copies=args.copies,
+        degrade_ratio=args.degrade_ratio,
+        min_conf=args.min_conf,
+        include_review=not args.auto_only,
+        geometry=not args.no_geometry,
+    )
+    if not (dataset / "lines").exists() and not args.pages:
+        print(f"Error: {dataset / 'lines'} not found; run the lines command with "
+              "--export-lines (or pass --pages)")
+        sys.exit(1)
+    index = augmenter.run(dataset, args.output, pages=args.pages)
+
+    pages = index[index['kind'] == 'page'] if not index.empty else index
+    lines = index[index['kind'] == 'line'] if not index.empty else index
+    print(f"Augmented line images: {len(lines)}  -> {Path(args.output) / 'lines'}")
+    if args.pages:
+        print(f"Augmented pages: {len(pages)} ({int(pages['lines'].sum()) if len(pages) else 0} "
+              f"text lines)  -> {Path(args.output) / 'pages'}")
+    print(f"Index: {(Path(args.output) / 'augment.csv').absolute()}")
+
+
 def main():
     """Main CLI function."""
     parser = argparse.ArgumentParser(description='Scrape Ticha Colonial Zapotec manuscript data')
@@ -311,6 +352,39 @@ def main():
     lines_parser.add_argument('-v', '--verbose', action='store_true',
                             help='Enable verbose logging')
 
+    # Augment command
+    augment_parser = subparsers.add_parser(
+        'augment', help='Augment the line dataset (low-quality look + variety)')
+    augment_parser.add_argument('-d', '--dataset', type=str, required=True,
+                              help='Output directory of the lines command')
+    augment_parser.add_argument('-o', '--output', type=str, default='ticha_augmented',
+                              help='Output directory (default: ticha_augmented)')
+    augment_parser.add_argument('-n', '--copies', type=int, default=2,
+                              help='Augmented copies per page / line image (default: 2)')
+    augment_parser.add_argument('--degrade-ratio', type=float, default=0.5,
+                              help='Share of copies imitating untranscribed scans; '
+                                   'the rest add generic variety (default: 0.5)')
+    augment_parser.add_argument('--target', type=str, default=None,
+                              help='Folder of real low-quality images to imitate '
+                                   '(default: built-in ranges measured on Ticha)')
+    augment_parser.add_argument('--underexposed-ratio', type=float, default=0.2,
+                              help='Share of degraded copies that are dark instead of '
+                                   'washed out, without --target (default: 0.2)')
+    augment_parser.add_argument('--min-conf', type=float, default=0.5,
+                              help='Lowest pair confidence kept as text (default: 0.5)')
+    augment_parser.add_argument('--auto-only', action='store_true',
+                              help='Use only auto/ pages (not confident lines of review/ pages)')
+    augment_parser.add_argument('--no-geometry', action='store_true',
+                              help='No rotation, slant, scaling or elastic distortion')
+    augment_parser.add_argument('--pages', action='store_true',
+                              help='Also augment whole pages as PAGE XML + image, reusing the '
+                                   'paired lines (e.g. to train segmentation); line images '
+                                   'are augmented by default')
+    augment_parser.add_argument('--seed', type=int, default=None,
+                              help='Random seed for reproducible output')
+    augment_parser.add_argument('-v', '--verbose', action='store_true',
+                              help='Enable verbose logging')
+
     args = parser.parse_args()
     
     # Handle verbose logging
@@ -327,6 +401,8 @@ def main():
         scrape_images(args)
     elif args.command == 'lines':
         pair_lines(args)
+    elif args.command == 'augment':
+        augment_dataset(args)
     else:
         parser.print_help()
         sys.exit(1)
