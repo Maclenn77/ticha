@@ -521,3 +521,43 @@ def test_transcription_lines_drop_line_references():
     assert transcription_lines("63r-1 loo ni cooti\n63r-5 Joseph de Paauedra\n8r de") == [
         "loo ni cooti", "Joseph de Paauedra", "8r de",
     ]
+
+
+def test_apply_review_keeps_fixes_and_drops_lines(inputs, tmp_path):
+    from ticha.core.review import apply_review, read_decisions
+
+    bad = dict(READINGS_BY_IMAGE)
+    bad["Tl675a/page_001.png"] = READINGS[:3] + ["xxxxxxxx qqqq zzzzzz"] + READINGS[4:]
+    out = inputs / "dataset"
+    LinePairer(segmenter=segmenter, recognizer=fake_recognizer(bad), review_tolerance=0).run(
+        inputs / "texts.csv", inputs / "images.csv", out
+    )
+    decisions = tmp_path / "decisions.txt"
+    decisions.write_text(
+        "# doc page line action [text]\n"
+        "Tl675a 1 4 fix cicanali rotia tobi cuelayo\n"
+        "Tl675a 1 2 drop\n"
+        "Gone 9 1 keep\n",
+        encoding="utf-8",
+    )
+    assert read_decisions(decisions)[("Tl675a", 1, 4)].text == "cicanali rotia tobi cuelayo"
+    result = apply_review(out, decisions, tmp_path / "reviewed")
+    assert result[["kept", "fixed", "dropped"]].sum().tolist() == [6, 1, 1]
+    assert result.attrs["unused"] == [("Gone", 9, 1)]
+    xml = ET.parse(tmp_path / "reviewed" / "Tl675a_page_001.xml")
+    texts = [
+        ln.findtext("p:TextEquiv/p:Unicode", namespaces=NS)
+        for ln in xml.iterfind(".//p:TextLine", NS)
+        if "fragment" not in ln.get("custom", "")
+    ]
+    assert texts[1] is None  # dropped
+    assert texts[3] == "cicanali rotia tobi cuelayo"  # fixed
+
+
+def test_read_decisions_rejects_bad_lines(tmp_path):
+    from ticha.core.review import read_decisions
+
+    path = tmp_path / "d.txt"
+    path.write_text("Al642 2 4 fix\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="needs the corrected text"):
+        read_decisions(path)
