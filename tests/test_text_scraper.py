@@ -235,3 +235,25 @@ def test_close():
     session.headers = {}
     TichaTextScraper(session=session).close()
     session.close.assert_called_once()
+
+
+def test_text_with_br_after_bare_br():
+    # html.parser in bs4 < 4.15 parses the <br/> after a bare <br> as a
+    # container holding the rest of the text
+    soup = BeautifulSoup(
+        "<br><div id='t'>(8r) <br/>Yo Pedro<br/>oy Jueves<br/></div>", "html.parser"
+    )
+    assert element_to_text(soup.find(id="t")) == "(8r)\nYo Pedro\noy Jueves"
+
+
+def test_strip_office_markup_keeps_the_transcription():
+    from ticha.core.text_scraper import strip_office_markup
+
+    text = (
+        "[if gte mso 9]><xml><br/> <w:WordDocument></w:WordDocument></xml><![endif]\n"
+        "<br/> <br/>\nStartFragment\nAnachii Domigo 26\n"
+        "[if !supportLineBreakNewLine]\n\n[endif]\npeo Jolio\nEndFragment"
+    )
+    assert strip_office_markup(text) == "Anachii Domigo 26\n\npeo Jolio"
+    assert strip_office_markup("q[ue] (?) <sic>") == "q[ue] (?) <sic>"
+    assert strip_office_markup(None) is None
