@@ -10,12 +10,17 @@ from ticha.core.line_pairing import (
     PAGE_NS,
     Line,
     LinePairer,
+    DocTask,
+    PageImage,
     align,
+    align_words,
     cer,
     normalize_for_matching,
     order_lines,
     split_transcription_pages,
+    split_words,
     transcription_lines,
+    words_text,
 )
 
 NS = {"p": PAGE_NS}
@@ -145,6 +150,63 @@ def test_order_lines_reads_spread_left_page_first():
 
 
 # -- alignment ----------------------------------------------------------- #
+
+
+def test_split_words_keeps_editorial_text_and_breaks():
+    texts = ["q[ue] su (?) tengo", "(?) Juan"]
+    words = split_words(texts)
+    assert [w.norm for w in words] == ["q", "su", "tengo", "iuan"]
+    assert words_text(texts, words, 1, 4) == "su (?) tengo (?) Juan"
+    assert [w.line_start for w in words] == [True, False, False, True]
+    assert [w.line_end for w in words] == [False, False, True, True]
+
+
+def test_align_words_recuts_reflowed_transcription():
+    # Transcription lines do not follow the manuscript lines
+    texts = ["pagaran la pena de ocho pesos que se aga el", "gasto de qualquiera justicia"]
+    readings = ["pagaran la pena de ocho", "pesos que se aga el gasto", "de qualquiera iusticia"]
+    words = split_words(texts)
+    steps = align_words(readings, words)
+    cut = [words_text(texts, words, a, b) for kind, _, a, b, _ in steps if kind == "pair"]
+    assert cut == [
+        "pagaran la pena de ocho",
+        "pesos que se aga el gasto",
+        "de qualquiera justicia",
+    ]
+
+
+def test_align_words_merges_lines_and_skips_untranscribed():
+    texts = ["Alcalde Juan Lopes", "Regidor Andres de la Cruz", "y lo firme"]
+    readings = ["papel sellado quartillo", "Alcalde Juan Lopes Regidor Andres dela Cruz", "y lo firme"]
+    words = split_words(texts)
+    steps = align_words(readings, words)
+    assert steps[0][:2] == ("line", 0)
+    pairs = [(k, words_text(texts, words, a, b)) for kind, k, a, b, _ in steps if kind == "pair"]
+    assert pairs == [
+        (1, "Alcalde Juan Lopes Regidor Andres de la Cruz"),
+        (2, "y lo firme"),
+    ]
+
+
+def test_hyphenated_word_is_split_between_lines(tmp_path):
+    # The transcription keeps "Castillo" whole; the scribe broke it: "Cas-" / "tillo"
+    texts = ["que paguen donde de via este difunto aora disen Castillo y su muger", "ya dicha"]
+    readings = ["que paguen donde de via este difunto, aora disen Cas-", "tillo y su muger ya dicha"]
+    image = tmp_path / "page_001.png"
+    Image.new("RGB", (2600, 600), "white").save(image)
+
+    def segment(path):
+        return {"lines": [make_line(300, 2400, 300), make_line(300, 2400, 400)], "regions": []}
+
+    pairer = LinePairer(segmenter=segment, recognizer=lambda path, lines: readings)
+    page = pairer._segment(PageImage(1, image))
+    pairer._pair_unit([page], texts)
+    assert [ln.text for ln in page.main] == [
+        "que paguen donde de via este difunto aora disen Cas-",
+        "tillo y su muger ya dicha",
+    ]
+    assert all(ln.confident for ln in page.main)
+
 
 
 def test_align_skips_untranscribed_lines_and_missing_lines():
@@ -280,7 +342,58 @@ def test_run_with_recognizer(inputs):
     }
 
 
+class Recognizer:
+    """Picklable fake recognizer, for worker processes."""
+
+    def __init__(self, readings_by_image):
+        self.readings_by_image = readings_by_image
+
+    def __call__(self, path, lines):
+        return fake_recognizer(self.readings_by_image)(path, lines)
+
+
+def test_parallel_run_matches_sequential(inputs):
+    def run(workers):
+        out = inputs / f"dataset_{workers}"
+        manifest = LinePairer(
+            segmenter=segmenter,
+            recognizer=Recognizer(READINGS_BY_IMAGE),
+            export_lines=True,
+        ).run(inputs / "texts.csv", inputs / "images.csv", out, workers=workers)
+        return out, manifest
+
+    seq_out, seq = run(1)
+    par_out, par = run(2)
+    path_cols = ["image", "xml"]
+    pd.testing.assert_frame_equal(
+        seq.drop(columns=path_cols),
+        par.drop(columns=path_cols),
+    )
+    seq_lines = pd.read_csv(seq_out / "lines.csv").drop(columns="crop")
+    par_lines = pd.read_csv(par_out / "lines.csv").drop(columns="crop")
+    pd.testing.assert_frame_equal(seq_lines, par_lines)
+    def files(out):
+        return sorted(p.relative_to(out) for p in out.rglob("*") if p.is_file())
+
+    assert files(seq_out) == files(par_out)
+
+
 def test_low_confidence_page_goes_to_review(inputs):
+    bad = dict(READINGS_BY_IMAGE)
+    bad["Tl675a/page_001.png"] = (
+        READINGS[:3] + ["xxxxxxxx qqqq zzzzzz"] + READINGS[4:]
+    )
+    out = inputs / "dataset"
+    manifest = LinePairer(
+        segmenter=segmenter, recognizer=fake_recognizer(bad), review_tolerance=0
+    ).run(inputs / "texts.csv", inputs / "images.csv", out)
+    row = manifest[manifest.doc_id == "Tl675a"].iloc[0]
+    assert row.status == "review"
+    assert (out / "review" / "Tl675a_page_001.xml").exists()
+    assert "cicanali rotia" in (out / "review" / "Tl675a_page_001.txt").read_text()
+
+
+def test_few_doubtful_lines_stay_auto_without_text(inputs):
     bad = dict(READINGS_BY_IMAGE)
     bad["Tl675a/page_001.png"] = (
         READINGS[:3] + ["xxxxxxxx qqqq zzzzzz"] + READINGS[4:]
@@ -290,9 +403,15 @@ def test_low_confidence_page_goes_to_review(inputs):
         inputs / "texts.csv", inputs / "images.csv", out
     )
     row = manifest[manifest.doc_id == "Tl675a"].iloc[0]
-    assert row.status == "review"
-    assert (out / "review" / "Tl675a_page_001.xml").exists()
-    assert "cicanali rotia" in (out / "review" / "Tl675a_page_001.txt").read_text()
+    assert row.status == "auto"  # 1 doubtful line of 8 is within the tolerance
+    assert row.confident_lines == 7
+    xml = ET.parse(out / "auto" / "Tl675a_page_001.xml")
+    texts = [
+        ln.findtext("p:TextEquiv/p:Unicode", namespaces=NS)
+        for ln in xml.iterfind(".//p:TextLine", NS)
+    ]
+    assert "cicanali rotia tobi cuelayo" not in texts
+    assert "suani Ana chij Jueues a 14" in texts
 
 
 def test_run_without_recognizer_pairs_in_order(inputs):
@@ -322,3 +441,83 @@ def test_segmenter_error_is_recorded(inputs):
         inputs / "texts.csv", inputs / "images.csv", inputs / "out"
     )
     assert set(manifest[manifest.doc_id == "Tl675a"].status) == {"error"}
+
+
+def test_rerun_moves_page_out_of_old_folder(inputs):
+    bad = dict(READINGS_BY_IMAGE)
+    bad["Tl675a/page_001.png"] = READINGS[:3] + ["xxxxxxxx qqqq zzzzzz"] + READINGS[4:]
+    out = inputs / "dataset"
+    LinePairer(segmenter=segmenter, recognizer=fake_recognizer(bad), review_tolerance=0).run(
+        inputs / "texts.csv", inputs / "images.csv", out
+    )
+    assert (out / "review" / "Tl675a_page_001.xml").exists()
+    LinePairer(segmenter=segmenter, recognizer=fake_recognizer(READINGS_BY_IMAGE)).run(
+        inputs / "texts.csv", inputs / "images.csv", out
+    )
+    assert (out / "auto" / "Tl675a_page_001.xml").exists()
+    assert not list((out / "review").glob("Tl675a_page_001.*"))
+
+
+def test_check_draws_sheets_of_selected_lines(inputs):
+    from ticha.core.check import check_pairing, select_lines
+
+    out = inputs / "dataset"
+    LinePairer(segmenter=segmenter, recognizer=fake_recognizer(READINGS_BY_IMAGE)).run(
+        inputs / "texts.csv", inputs / "images.csv", out
+    )
+    rows = select_lines(out, only="confident", docs=["Tl675a"], sample=None)
+    assert len(rows) == 8
+    assert set(rows["kind"]) == {"confident"}
+
+    sheets = check_pairing(out, inputs / "check" / "sheet.png", docs=["Tl675a"],
+                           sample=None, per_sheet=5)
+    assert [s.name for s in sheets] == ["sheet_001.png", "sheet_002.png"]
+    assert Image.open(sheets[0]).width == 1600
+
+
+def test_word_broken_without_hyphen_is_split(tmp_path):
+    texts = ["y yo el escrivano doy fe de palabra de Verdad, como comparecio Juana"]
+    readings = ["y yo el escrivano doy fe de palabra dever", "dad, como comparecio Juana"]
+    image = tmp_path / "page_001.png"
+    Image.new("RGB", (2600, 600), "white").save(image)
+
+    def segment(path):
+        return {"lines": [make_line(300, 2400, 300), make_line(300, 2400, 400)], "regions": []}
+
+    pairer = LinePairer(segmenter=segment, recognizer=lambda path, lines: readings)
+    page = pairer._segment(PageImage(1, image))
+    pairer._pair_unit([page], texts)
+    assert [ln.text for ln in page.main] == [
+        "y yo el escrivano doy fe de palabra de Ver",
+        "dad, como comparecio Juana",
+    ]
+
+
+def test_page_with_swapped_folio_is_paired_with_the_other_folio(tmp_path):
+    recto = ["en el pueblo de santo domingo", "ante los alcaldes ordinarios",
+             "parecio juana de silva viuda", "y vendio un pedaso de tierra",
+             "que heredo de su marido difunto"]
+    verso = ["y lo firme en esta ciudad", "de antequera a veinte de julio",
+             "manuel diaz interprete nombrado", "ante mi juan de la cruz escribano",
+             "testigos pedro y pablo mendes"]
+    pages = [PageImage(1, tmp_path / "p1.png", "1r"), PageImage(2, tmp_path / "p2.png", "1v")]
+    readings = {"p1.png": verso, "p2.png": recto}  # the images are swapped
+    for page in pages:
+        Image.new("RGB", (2600, 800), "white").save(page.path)
+
+    def segment(path):
+        return {"lines": [make_line(300, 2400, 150 * (i + 1)) for i in range(5)], "regions": []}
+
+    pairer = LinePairer(segmenter=segment, recognizer=lambda path, lines: readings[path.name])
+    task = DocTask("Doc", pages, "(1r)\n" + "\n".join(recto) + "\n(1v)\n" + "\n".join(verso))
+    results, notes = pairer.process_document(task)
+    assert [ln.text for ln in results[0].main] == verso
+    assert [ln.text for ln in results[1].main] == recto
+    assert all(ln.confident for r in results for ln in r.main)
+    assert any("paired with folio 1v" in n for n in notes)
+
+
+def test_transcription_lines_drop_line_references():
+    assert transcription_lines("63r-1 loo ni cooti\n63r-5 Joseph de Paauedra\n8r de") == [
+        "loo ni cooti", "Joseph de Paauedra", "8r de",
+    ]

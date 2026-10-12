@@ -207,3 +207,15 @@ marimo/_lsp/
 __marimo__/
 
 *.csv
+
+# Data
+ticha_images/
+auto/
+review/
+lines/
+ticha_augmented/
+
+# Pipeline data (downloads, paired pages, splits)
+data/
+# Contact sheets written by `ticha-scraper check`
+check/

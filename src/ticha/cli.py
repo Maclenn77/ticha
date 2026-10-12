@@ -7,6 +7,7 @@ from .core.scraper import TichaScraper
 from .core.text_scraper import TichaTextScraper
 from .core.image_scraper import TichaImageScraper
 from .core.augmentation import Augmenter, DatasetAugmenter, load_targets
+from .core.check import SELECTIONS, check_pairing
 from .core.line_pairing import (
     DEFAULT_MODEL,
     DEFAULT_STATUSES,
@@ -146,7 +147,7 @@ def scrape_images(args):
         print("First run: ticha-scraper manuscripts -o manuscripts.csv")
         sys.exit(1)
 
-    image_scraper = TichaImageScraper(rate_limit=args.rate_limit)
+    image_scraper = TichaImageScraper(rate_limit=args.rate_limit, tile_workers=args.tile_workers)
 
     try:
         results_df = image_scraper.download_images_from_dataframe(
@@ -203,11 +204,15 @@ def pair_lines(args):
         statuses=statuses,
         split_columns=not args.no_split_columns,
         cer_threshold=args.cer_threshold,
+        max_cer=args.max_cer,
+        min_margin=args.min_margin,
+        review_tolerance=args.review_tolerance,
         export_lines=args.export_lines,
     )
 
     try:
-        manifest = pairer.run(args.texts, args.images, output_dir, max_documents=args.max_docs)
+        manifest = pairer.run(args.texts, args.images, output_dir, max_documents=args.max_docs,
+                              workers=args.workers)
     except KeyboardInterrupt:
         print("\nInterrupted by user (finished pages are cached and kept)")
         sys.exit(1)
@@ -215,6 +220,9 @@ def pair_lines(args):
     counts = manifest['status'].value_counts().to_dict() if not manifest.empty else {}
     print(f"\nPages paired automatically: {counts.get('auto', 0)}  -> {output_dir / 'auto'}")
     print(f"Pages for human review:     {counts.get('review', 0)}  -> {output_dir / 'review'}")
+    if counts.get('untranscribed'):
+        print(f"Pages without transcription: {counts['untranscribed']}  -> "
+              f"{output_dir / 'untranscribed'}")
     print(f"Documents skipped:          {counts.get('skipped', 0)}")
     if counts.get('error'):
         print(f"Pages with errors:          {counts['error']}")
@@ -222,6 +230,31 @@ def pair_lines(args):
         print(f"Confident line pairs:       {int(manifest['confident_lines'].sum())} "
               f"of {int(manifest['paired_lines'].sum())} paired")
     print(f"Manifest: {(output_dir / 'manifest.csv').absolute()}")
+
+
+def check_lines(args):
+    """Draw line crops with their paired text, to check the pairing by eye."""
+    dataset = Path(args.dataset)
+    for name in ("manifest.csv", "lines.csv"):
+        if not (dataset / name).exists():
+            print(f"Error: {dataset / name} not found (run the lines command first)")
+            sys.exit(1)
+    sheets = check_pairing(
+        dataset,
+        args.output,
+        only=args.only,
+        statuses=args.status,
+        docs=args.doc,
+        sample=args.sample or None,
+        seed=args.seed,
+        per_sheet=args.per_sheet,
+    )
+    if not sheets:
+        print("No lines match the selection")
+        return
+    print(f"Wrote {len(sheets)} sheet(s):")
+    for sheet in sheets:
+        print(f"  {sheet}")
 
 
 def augment_dataset(args):
@@ -309,6 +342,8 @@ def main():
                              help='Output CSV index of downloaded images (default: ticha_images.csv)')
     images_parser.add_argument('-f', '--format', choices=['png', 'jpg', 'tif'], default='png',
                              help='Output image format (default: png)')
+    images_parser.add_argument('--tile-workers', type=int, default=4,
+                             help='Image tiles downloaded at the same time (default: 4)')
     images_parser.add_argument('--max-dimension', type=int, default=None,
                              help='Limit the largest side of each image in pixels (default: full resolution)')
     images_parser.add_argument('--pdf', action='store_true',
@@ -341,18 +376,53 @@ def main():
                             help='Pair lines in order instead (pages need equal line counts)')
     lines_parser.add_argument('--cer-threshold', type=float, default=0.5,
                             help='Highest character error rate for a confident pair (default: 0.5)')
+    lines_parser.add_argument('--max-cer', type=float, default=0.75,
+                            help='Pairs up to this CER are still confident when their text fits '
+                                 'clearly better than the neighbouring texts (default: 0.75)')
+    lines_parser.add_argument('--min-margin', type=float, default=0.15,
+                            help='How much better (in CER) than the neighbouring texts, see '
+                                 '--max-cer (default: 0.15)')
+    lines_parser.add_argument('--review-tolerance', type=float, default=0.2,
+                            help='Share of doubtful lines (or of transcription without a line) '
+                                 'a page may have and still go to auto/, with the doubtful lines '
+                                 'left without text; 0 = every line must be confident '
+                                 '(default: 0.2)')
     lines_parser.add_argument('--export-lines', action='store_true',
                             help='Also write line images + .gt.txt of confidently paired lines')
     lines_parser.add_argument('--no-split-columns', action='store_true',
                             help='Do not split transcription lines on runs of 4+ spaces')
     lines_parser.add_argument('--device', type=str, default='cpu',
                             help='Device for kraken, e.g. cpu or cuda:0 (default: cpu)')
+    lines_parser.add_argument('-w', '--workers', type=int, default=1,
+                            help='Documents processed in parallel, one process each '
+                                 '(~2 GB RAM per worker; default: 1)')
     lines_parser.add_argument('--max-docs', type=int, default=None,
                             help='Maximum number of documents to process (default: all)')
     lines_parser.add_argument('-v', '--verbose', action='store_true',
                             help='Enable verbose logging')
 
     # Augment command
+    check_parser = subparsers.add_parser(
+        'check', help='Draw sample line crops with their paired text, to check the pairing')
+    check_parser.add_argument('-d', '--dataset', type=str, default='ticha_lines',
+                              help='Output directory of the lines command (default: ticha_lines)')
+    check_parser.add_argument('-o', '--output', type=str, default='check/check.png',
+                              help='Sheet path; numbered _001, _002, ... (default: check/check.png)')
+    check_parser.add_argument('--only', choices=SELECTIONS, default='all',
+                              help='Lines to draw: confident, doubtful, unpaired (no text), '
+                                   'paired (confident + doubtful) or all (default: all)')
+    check_parser.add_argument('-s', '--status', action='append',
+                              choices=['auto', 'review', 'untranscribed'],
+                              help='Only lines of pages with this status (repeatable)')
+    check_parser.add_argument('--doc', action='append',
+                              help='Only lines of this document id, e.g. SDE740dT (repeatable)')
+    check_parser.add_argument('-n', '--sample', type=int, default=30,
+                              help='Random lines to draw; 0 = every selected line (default: 30)')
+    check_parser.add_argument('--seed', type=int, default=0,
+                              help='Random seed of the sample (default: 0)')
+    check_parser.add_argument('--per-sheet', type=int, default=15,
+                              help='Lines per image (default: 15)')
+
     augment_parser = subparsers.add_parser(
         'augment', help='Augment the line dataset (low-quality look + variety)')
     augment_parser.add_argument('-d', '--dataset', type=str, required=True,
@@ -401,6 +471,8 @@ def main():
         scrape_images(args)
     elif args.command == 'lines':
         pair_lines(args)
+    elif args.command == 'check':
+        check_lines(args)
     elif args.command == 'augment':
         augment_dataset(args)
     else:

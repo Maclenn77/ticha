@@ -46,6 +46,22 @@ TEXT_FIELDS = list(FEATURED_FIELDS)
 PLACEHOLDER_RE = re.compile(r"^this document does not currently have", re.I)
 FEATURED_URL_RE = re.compile(r"^(.*/text/[^/]+/)(?:overview|\d+)/?$")
 SOURCE_WHITESPACE_RE = re.compile(r"[ \t\r\n\f\v]+")
+# Microsoft Word "conditional comments" pasted into some transcriptions
+# (``[if gte mso 9]><xml>...<![endif]``, ``[if !supportLineBreakNewLine]``)
+OFFICE_MARKUP_RE = re.compile(r"<?!?\[if [^\]]*\].*?\[endif\]>?|<!--.*?-->", re.S)
+
+
+def strip_office_markup(text: Optional[str]) -> Optional[str]:
+    """Remove Word conditional-comment blocks left in a transcription."""
+    if not isinstance(text, str):
+        return text
+    cleaned = OFFICE_MARKUP_RE.sub("", text)
+    cleaned = re.sub(r"<br\s*/?>|\b(?:Start|End)Fragment\b", "", cleaned)
+    cleaned = "\n".join(line.strip() for line in cleaned.split("\n"))
+    if cleaned == text:
+        return text
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
+    return cleaned or None
 
 
 def element_to_text(element: Optional[Tag]) -> Optional[str]:
@@ -64,7 +80,10 @@ def element_to_text(element: Optional[Tag]) -> Optional[str]:
         for string in element.find_all(string=True):
             string.replace_with(SOURCE_WHITESPACE_RE.sub(" ", string))
         for br in element.find_all("br"):
-            br.replace_with("\n")
+            # unwrap, not replace: html.parser in bs4 < 4.15 can nest the rest
+            # of the text inside a <br/> that follows a bare <br>
+            br.insert_before("\n")
+            br.unwrap()
         for block in element.find_all(["p", "div"]):
             block.insert_before("\n\n")
             block.append("\n\n")
@@ -75,6 +94,7 @@ def element_to_text(element: Optional[Tag]) -> Optional[str]:
         for line in text.split("\n")
     ]
     text = re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
+    text = strip_office_markup(text)
     if not text or PLACEHOLDER_RE.match(text):
         return None
     return text

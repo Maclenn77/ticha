@@ -100,6 +100,11 @@ ticha-scraper images -i manuscripts.csv -d images -o images.csv
 ticha-scraper lines  -t texts.csv -i images.csv -d dataset --export-lines
 ```
 
+`-w N` processes N documents in parallel, each in its own process with its
+own copy of the models (~2 GB of RAM per worker). On an 8-core Apple Silicon
+laptop with 8 GB, `-w 2` segments about 1.6x faster than one process (`-w 3`,
+1.9x, is the most that fits in memory).
+
 Steps:
 
 1. **Cleaning**: documents without a transcription are skipped, and by
@@ -113,17 +118,69 @@ Steps:
    ([McCATMuS](https://doi.org/10.5281/zenodo.13788177), downloaded on first
    use; `--model` to change it) reads each line roughly. The reading is only
    used to find which transcription line belongs to which image line.
-4. **Alignment**: image lines and transcription lines are aligned in order;
-   image lines may stay without text (stamped-paper headers, untranscribed
-   signatures) and transcription lines may stay without an image line. Each
-   pair gets a confidence `1 - CER` between reading and transcription
-   (`--cer-threshold`, default 0.5). Pages are aligned on their own when the
-   transcription's folio markers (`(8r)`, `[40r]`) match the image folios,
-   otherwise the whole document at once.
-5. **Sorting**: pages where every transcription line found a confident line
-   go to `auto/`. **Nothing is discarded**: every other page goes to
-   `review/`, pre-filled with the best alignment, with the transcription
-   lines assigned to it in a `.txt`. The reason is in `manifest.csv`.
+4. **Alignment**: the transcription is treated as a stream of words and cut
+   into the spans read on each image line, so transcriptions whose line
+   breaks do not follow the manuscript (re-flowed text, two transcription
+   lines on one manuscript line, or the reverse) are paired too; the
+   transcription's own breaks are kept when they fit. A word the scribe broke
+   across two lines (reading ends in `-`/`=`) is split between them. Image
+   lines may stay without text (stamped-paper headers, untranscribed
+   signatures) and words may stay without a line. Pages are aligned on their
+   own when the transcription's folio markers (`(8r)`, `[40r]`) match the
+   image folios, otherwise the whole document at once.
+5. **Confidence**: a pair is confident when its text fits the reading better
+   than the neighbouring lines' texts (an off-by-one alignment would fit a
+   neighbour as well), the reading has a plausible length for the text, and
+   either its CER is at most `--cer-threshold` (0.5) or, up to `--max-cer`
+   (0.75), it beats the neighbours by `--min-margin` (0.15): the generic
+   model misreads Zapotec, so right pairs often have a high CER.
+   `TextEquiv/@conf` is `1 - CER`, kept at 0.5 or above for confident pairs
+   and below 0.5 for doubtful ones.
+6. **Sorting**: pages go to `auto/` when at most `--review-tolerance` (20%)
+   of their pairs are doubtful and of their transcription found no line;
+   doubtful lines are written there **without text**, so they are left out
+   of training (their best guess stays in `lines.csv`). `--review-tolerance 0`
+   restores the strict rule. **Nothing is discarded**: every other page goes
+   to `review/`, pre-filled with the best alignment, with the transcription
+   assigned to it in a `.txt`. Pages to which no transcription was assigned
+   (blank backs, covers) go to `untranscribed/`. The reason is in
+   `manifest.csv`.
+
+#### Building the train / validation / test dataset
+
+`scripts/build_dataset.py` (steps 6-10 of `notebooks/ticha_pipeline.ipynb`)
+takes the `auto/` pages and the pages corrected by hand in `data/reviewed/`,
+splits the documents 80/10/10 (by lines, within each language) and cuts the
+lines. Augmented copies are kept in a separate folder:
+
+```
+data/splits/{train,validation,test}/lines/...   original lines (+ train.txt, validation.txt, test.txt)
+data/augmented/train/lines/...                   degrade + variety copies of train lines (train.txt)
+data/augmented/test_degraded/lines/...           degrade-only copies of test lines (test_degraded.txt)
+```
+
+```bash
+python scripts/build_dataset.py --copies 4 --degrade-ratio 0.5 --test-degraded-copies 1
+cat data/splits/train.txt data/augmented/train.txt > train_all.txt
+ketos train -f path -t train_all.txt -e data/splits/validation.txt
+ketos test -f path -m model.safetensors -e data/splits/test.txt              # real scans
+ketos test -f path -m model.safetensors -e data/augmented/test_degraded.txt  # low quality
+```
+
+#### Checking the pairing by eye
+
+`check` draws random line crops with the text paired with them, the HTR
+reading and the CER (green: confident, red: doubtful, gray: no text), to
+see whether the pairs are right before training on them:
+
+```bash
+ticha-scraper check -d dataset --only doubtful -n 30            # 30 doubtful lines
+ticha-scraper check -d dataset --only confident -s auto -n 45   # what goes to training
+ticha-scraper check -d dataset --doc SDE740dT -n 0 -o check/SDE740dT.png  # a whole document
+```
+
+Sheets are written as `check/check_001.png`, `check/check_002.png`, ...
+(15 lines each, `--per-sheet` to change).
 
 `--no-recognition` skips steps 3-4 and pairs lines in order (a page is
 accepted only when the line counts agree).
@@ -138,6 +195,7 @@ dataset/
 │   ├── Al714_page_001.png
 │   └── Al714_page_001.xml
 ├── review/                 # PAGE XML + image + .txt for human correction
+├── untranscribed/          # pages without transcription (segmentation only)
 ├── lines/                  # with --export-lines: line_001.png + line_001.gt.txt
 │                           #   (every confident pair, also from review pages)
 ├── segmentation/           # kraken caches: re-runs skip segmentation
@@ -187,6 +245,13 @@ lines and transforming their coordinates), e.g. to train segmentation.
 
 Split train/validation/test **by document before augmenting**, so copies of
 the same line never end up on both sides.
+
+### Full pipeline notebook
+
+[`notebooks/ticha_pipeline.ipynb`](notebooks/ticha_pipeline.ipynb) runs every
+step, from downloading to the final train/validation/test dataset with
+augmentation and metrics, using the code in `src/` directly. Set up its conda
+environment as described in [`ENVIRONMENT.md`](ENVIRONMENT.md).
 
 ## Data Structure
 

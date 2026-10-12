@@ -66,6 +66,7 @@ def write_page(path, image_name, confs):
             boundary=[[150, y - 40], [1050, y - 40], [1050, y + 10], [150, y + 10]],
             text=f"linea {i}",
             cer=None if conf is None else 1 - conf,
+            confident=conf is not None and conf >= 0.5,
         )
         lines.append(line)
     write_page_xml(lines, [], image_name, (1200, 1600), path)

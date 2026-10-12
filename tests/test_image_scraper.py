@@ -2,6 +2,7 @@
 
 import math
 from io import BytesIO
+from pathlib import Path
 from unittest.mock import Mock
 
 import pandas as pd
@@ -125,6 +126,16 @@ def test_stitch_reproduces_full_resolution(scraper_with_pyramid, source_image):
     assert stitched.tobytes() == source_image.tobytes()
 
 
+@pytest.mark.parametrize("tile_workers", [1, 4])
+def test_stitch_is_identical_with_parallel_tiles(
+    scraper_with_pyramid, source_image, tile_workers
+):
+    scraper, _ = scraper_with_pyramid
+    scraper.tile_workers = tile_workers
+    stitched = scraper.stitch_dzi(scraper.load_dzi(DZI_URL))
+    assert stitched.tobytes() == source_image.tobytes()
+
+
 def test_download_dzi_writes_file(scraper_with_pyramid, tmp_path):
     scraper, _ = scraper_with_pyramid
     out = scraper.download_dzi(DZI_URL, tmp_path / "p.png", max_dimension=160)
@@ -201,6 +212,26 @@ def test_download_images_from_dataframe(scraper_with_pyramid, tmp_path):
     assert len(result) == 1
     assert result.iloc[0]["image_count"] == 1
     assert result.iloc[0]["document_name"] == "Doc 1"
+
+
+def test_existing_pages_are_not_downloaded_again(scraper_with_pyramid, tmp_path):
+    scraper, files = scraper_with_pyramid
+    page_url = f"{BASE}/en/texts/doc1/"
+    files[page_url] = b'<div data-dzi="/static/dzi/doc1/page1.dzi"></div>'
+    first = scraper.download_document_images(page_url, tmp_path, try_pdf=False)
+    saved = Path(first["image_paths"][0])
+    assert not list(saved.parent.glob("*.part*"))
+    requests_before = scraper.session.get.call_count
+    assert any("_files/" in c.args[0] for c in scraper.session.get.call_args_list)
+
+    again = scraper.download_document_images(page_url, tmp_path, try_pdf=False)
+    tiles = [
+        c.args[0] for c in scraper.session.get.call_args_list[requests_before:]
+        if "_files/" in c.args[0]
+    ]
+    assert tiles == []
+    assert again["image_paths"] == first["image_paths"]
+    assert again["image_folios"] == first["image_folios"]
 
 
 # Markup below mirrors the live Ticha pages (trimmed).
@@ -284,3 +315,57 @@ def test_load_dzi_retries_without_leading_zero(scraper_with_pyramid):
     files[DZI_URL.replace("page1.dzi", "doc_9r.dzi")] = files[DZI_URL]
     info = scraper.load_dzi(padded)
     assert info.url.endswith("doc_9r.dzi")
+
+
+def test_load_dzi_retries_with_leading_zero(scraper_with_pyramid):
+    # data-pages="9r-9v" while the server stores Th687_09r.dzi
+    scraper, files = scraper_with_pyramid
+    files[DZI_URL.replace("page1.dzi", "doc_09r.dzi")] = files[DZI_URL]
+    info = scraper.load_dzi(DZI_URL.replace("page1.dzi", "doc_9r.dzi"))
+    assert info.url.endswith("doc_09r.dzi")
+
+
+def test_load_dzi_raises_when_no_variant_exists(scraper_with_pyramid):
+    scraper, _ = scraper_with_pyramid
+    with pytest.raises(requests.HTTPError):
+        scraper.load_dzi(DZI_URL.replace("page1.dzi", "doc_9r.dzi"))
+
+
+@pytest.mark.parametrize(
+    "folio, expected",
+    [
+        ("9r", ["09r", "009r"]),
+        ("09r", ["9r", "009r"]),
+        ("14", ["014"]),
+        ("614", []),
+    ],
+)
+def test_folio_variants(folio, expected):
+    from ticha.core.image_scraper import _folio_variants
+
+    url = f"{BASE}/images/dzi/Th687_{folio}.dzi"
+    assert _folio_variants(url) == [f"{BASE}/images/dzi/Th687_{f}.dzi" for f in expected]
+
+
+def test_failed_pages_are_reported(scraper_with_pyramid, tmp_path):
+    scraper, files = scraper_with_pyramid
+    page_url = f"{BASE}/en/texts/doc1/"
+    files[page_url] = (
+        b'<div data-dzi="/static/dzi/doc1/page1.dzi"></div>'
+        b'<div data-dzi="/static/dzi/doc1/page2.dzi"></div>'
+    )
+    result = scraper.download_document_images(page_url, tmp_path, try_pdf=False)
+    assert result["image_folios"] == ["page1"]
+    assert result["missing_folios"] == ["page2"]
+    assert result["error"] is None  # partial download is not an error
+
+
+def test_document_without_any_page_is_an_error(scraper_with_pyramid, tmp_path):
+    scraper, files = scraper_with_pyramid
+    page_url = f"{BASE}/en/texts/doc1/"
+    files[page_url] = b'<div data-dzi="/static/dzi/doc1/missing.dzi"></div>'
+    df = pd.DataFrame({"document_link": [page_url]})
+    row = scraper.download_images_from_dataframe(df, tmp_path, try_pdf=False).iloc[0]
+    assert row["image_count"] == 0
+    assert row["missing_folios"] == "missing"
+    assert row["error"].startswith("All 1 pages failed")
