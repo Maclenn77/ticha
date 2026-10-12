@@ -146,6 +146,33 @@ Steps:
    (blank backs, covers) go to `untranscribed/`. The reason is in
    `manifest.csv`.
 
+#### Applying a review (`review` command)
+
+Pages in `review/` can be reviewed line by line against the images (with
+`check`) and the decisions written to a text file, one line per decision:
+`doc page line keep|drop|fix [text]`. `review` applies the file and writes
+the reviewed PAGE XML, which the dataset build uses for those pages. The
+review of the published dataset is in `review/decisions.txt`:
+
+```bash
+ticha-scraper review -d data/paired --decisions review/decisions.txt -o data/reviewed
+```
+
+#### Reproducing the published dataset
+
+`notebooks/ticha_pipeline.ipynb` runs every step. The pieces that make the
+result reproducible:
+
+- **Segmentation:** kraken's default baseline model, fixed by `kraken==7.1.1`
+  in `environment.yml`.
+- **Pairing:** McCATMuS fine-tuned on Ticha lines (`FINETUNED_SOURCE =
+  "download"` takes the published model; `"train"` fine-tunes it again on a
+  first pass with McCATMuS) and the confidence settings `CER_THRESHOLD = 0.5`,
+  `MAX_CER = 0.75`, `MIN_MARGIN = 0.15`, `REVIEW_TOLERANCE = 0.2` (the
+  defaults of the `lines` command).
+- **Review:** `review/decisions.txt`, applied in step 6.
+- **Split and augmentation:** fixed seed (`SEED = 42`).
+
 #### Building the train / validation / test dataset
 
 `scripts/build_dataset.py` (steps 6-10 of `notebooks/ticha_pipeline.ipynb`)
