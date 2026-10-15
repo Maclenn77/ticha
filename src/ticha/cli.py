@@ -8,6 +8,7 @@ from .core.text_scraper import TichaTextScraper
 from .core.image_scraper import TichaImageScraper
 from .core.augmentation import Augmenter, DatasetAugmenter, load_targets
 from .core.check import SELECTIONS, check_pairing
+from .core.review import apply_review
 from .core.line_pairing import (
     DEFAULT_MODEL,
     DEFAULT_STATUSES,
@@ -257,6 +258,21 @@ def check_lines(args):
         print(f"  {sheet}")
 
 
+def review_pages(args):
+    """Apply a review decisions file to the review/ pages of a lines output."""
+    dataset = Path(args.dataset)
+    if not (dataset / "manifest.csv").exists():
+        print(f"Error: {dataset / 'manifest.csv'} not found (run the lines command first)")
+        sys.exit(1)
+    result = apply_review(dataset, Path(args.decisions), Path(args.output), min_conf=args.min_conf)
+    totals = result[["kept", "fixed", "dropped"]].sum()
+    print(f"Reviewed pages: {len(result)} -> {args.output}")
+    print(f"Lines kept: {int(totals['kept'])}, fixed: {int(totals['fixed'])}, "
+          f"left without text: {int(totals['dropped'])}")
+    if result.attrs["unused"]:
+        print(f"Decisions for pages not in review (ignored): {len(result.attrs['unused'])}")
+
+
 def augment_dataset(args):
     """Augment the line dataset (pages and line crops)."""
     print("Starting data augmentation...")
@@ -423,6 +439,19 @@ def main():
     check_parser.add_argument('--per-sheet', type=int, default=15,
                               help='Lines per image (default: 15)')
 
+    review_parser = subparsers.add_parser(
+        'review', help='Apply a line-by-line review (decisions file) to the review/ pages')
+    review_parser.add_argument('-d', '--dataset', type=str, default='ticha_lines',
+                               help='Output directory of the lines command (default: ticha_lines)')
+    review_parser.add_argument('--decisions', type=str, default='review/decisions.txt',
+                               help='Decisions file: "doc page line keep|drop|fix [text]" per line '
+                                    '(default: review/decisions.txt)')
+    review_parser.add_argument('-o', '--output', type=str, default='reviewed',
+                               help='Folder for the reviewed PAGE XML (default: reviewed)')
+    review_parser.add_argument('--min-conf', type=float, default=0.5,
+                               help='Lines not in the decisions file keep their text if their '
+                                    'confidence is at least this (default: 0.5)')
+
     augment_parser = subparsers.add_parser(
         'augment', help='Augment the line dataset (low-quality look + variety)')
     augment_parser.add_argument('-d', '--dataset', type=str, required=True,
@@ -473,6 +502,8 @@ def main():
         pair_lines(args)
     elif args.command == 'check':
         check_lines(args)
+    elif args.command == 'review':
+        review_pages(args)
     elif args.command == 'augment':
         augment_dataset(args)
     else:

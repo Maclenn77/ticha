@@ -1,0 +1,105 @@
+# doc page line action [text]   (keep | drop | fix <text>) ; unlisted: confident=keep, doubtful=drop
+Al642 2 4 fix 50 p[eso]s cama xiteni xico
+Al642 2 10 fix ximonio peresi | a dre
+Al642 2 11 drop
+Al683aT 3 3 fix de Abril de mill setesientos y quin
+Al683aT 3 5 keep
+Al684 3 3 fix quiraa ticha riini pezooba tiaga na
+Al684 3 4 drop
+Al686aT 2 4 fix (?) nombrado quinaaxoqua- Y la tierra nombrado
+Al686aT 2 12 drop
+Al686aT 2 13 drop
+Al686aT 2 15 drop
+Al686aT 2 16 drop
+Al686aT 2 22 fix mis hijos- Aora mencionare los linderos que es el (?)
+Al686aT 2 24 fix do lachi sahui quetoni, queche, Se ba para arriba
+Al686aT 2 25 fix xe nombrado xohuiy que es adonde nosotros a lin
+Al686aT 2 27 drop
+Al697 3 1 drop
+Al697 3 10 fix Ma ria Barbula, y p[or] que Conste Lo firme en 31 de hen. º de 98 a˜
+Al697 3 11 fix Joseph de Paauedra
+Al699T 2 4 fix segun consta en su original
+Al699T 2 5 drop
+Al709b 1 12 drop
+Al709bT 1 4 fix andres Martin Andres peres alcalde
+Al709bT 1 7 fix pedro Pablo tes
+Al710 1 20 drop
+Al710 1 21 drop
+Al710T 1 31 fix y del pueblo de San Andrés nosotros Justicias An
+Al710T 1 32 fix dres Perez Alcalde Pablo Cabrera regidor domin
+Al710T 1 33 fix go Hernandez alguasil mayor Andres Martin y An
+Al711bT 2 6 fix thomas Gomes
+Al714 2 6 fix naa pelipe de Sanctiago
+Al714 2 7 drop
+Al714 2 12 fix che la naa Herna ndo Lop
+Al714 2 13 fix alcaldes
+Al714 2 16 fix escriuanos
+Al741T 1 5 fix terprete del Jusgado del Señor Don An
+Al741T 1 6 fix (ysal?) Rexidor pertuo de la Ciudad de
+Al741T 1 8 fix su Magistad de esta Ciudad y su provincia
+Al741T 1 9 fix ra- En virtud el Auto que Antessede Al
+Al741T 1 10 fix nasio Jphe Villa Señor y Cervante Abogada
+Al741T 1 11 fix la Real Audiencia de este N.E. y del preso
+Al741T 1 13 fix este Reyno de pobres
+Al741T 2 2 fix llama Nro
+Al741T 2 3 fix Dios el
+Al741T 2 7 fix Garcia: Creo en todo mi Alm
+Al741T 2 8 fix que son tres perzona Dios
+Al741T 2 11 fix los quatro Orasion de Amoroso Virgen San
+Al741T 2 16 drop
+Al741T 3 2 drop
+Al741T 3 9 drop
+Al741T 3 12 drop
+Al741T 4 3 drop
+Al741T 6 2 fix lindero tie
+Al741T 6 6 fix la pintura
+Al741T 7 2 fix misa de Vi
+Al741T 7 6 drop
+Al776T 1 10 drop
+Al776T 1 16 fix Oficio de la Ynquisision de este Reyno de pobres
+Al776T 1 19 drop
+Al776T 2 1 fix cuyo thenor es como
+Al776T 2 4 keep
+Al776T 2 7 keep
+Al776T 2 8 keep
+Al776T 2 10 keep
+Al776T 2 13 drop
+Al776T 3 8 fix yo que le disen en Lengua quiniaquecoritaliu
+Al776T 3 10 keep
+Al776T 3 11 keep
+Al776T 3 13 keep
+Oc731 2 4 fix manuel Sanches nali bene cheni xoopa peso
+Oc731 2 6 fix canaca Xini chana
+Oc731 2 9 keep
+Oc731 2 10 keep
+Oc731 2 12 keep
+Oc731 2 13 fix venta
+Oc731 2 16 fix regidor
+Ri832 8 10 fix y de mi lugar Manuela pr q estandaros bibo
+Ri832 8 14 drop
+Ri832 8 29 fix Hernandes no saben
+SDE660 4 1 fix (Y?)enichi escritt
+SDE660 4 3 fix Presentar aud
+SDE693b 2 3 fix Nij sicanij Renapeya nij = ana chij marttej Cochetta Lasepeo de
+SDE693b 2 6 fix Don Andres Ramirez Domingo Gon
+SDE693b 2 7 fix de Leon
+SDE693b 2 10 keep
+SDE716 20 5 fix chi lunes
+SDE716 20 6 fix ebrero del
+SDE726 4 3 fix venta nona
+SDE726 4 6 fix ana chi lunes
+SDE726 4 7 fix de marzo de 172
+SDE741aT 5 2 fix afirmo, y ratifico y lo firme en esta ciudad de
+SDE741aT 5 3 fix Antequera y Novie
+SDE741aT 5 5 fix Ynterpte Nombdo
+SDE746cT 4 3 fix fico y lo firme en esta ciudad de Anteqa
+SDE746cT 4 6 keep
+SDE746e 3 1 fix Ambrosio Luiz Ramires argo pa testigo Ignacio Peres
+SDE746e 3 2 keep
+SDE746e 3 3 keep
+SDE746e 4 4 fix Justicia yssa
+Ta672 4 4 fix (mas las?) bautista
+Ta672 4 9 keep
+Tl675bT 4 2 fix ancho = Ve=
+Za719 4 11 fix fr[ay] Joseph de Vergara
+Za719 4 12 keep

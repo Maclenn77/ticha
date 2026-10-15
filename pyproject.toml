@@ -53,6 +53,7 @@ dependencies = [
 lines = [
     "kraken>=6.0,<8",
     "rapidfuzz>=3.0",
+    "huggingface_hub>=0.20,<2",  # fine-tuned alignment model; 2.x needs click>=8.4, kraken 7.1 needs <8.3
 ]
 dev = [
     "pytest>=7.0.0",

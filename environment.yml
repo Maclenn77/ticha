@@ -32,3 +32,5 @@ dependencies:
       # kraken (segmentation + HTR) pulls PyTorch from PyPI, which has the
       # Apple Silicon (MPS) and CUDA builds.
       - kraken==7.1.1
+      # downloads the fine-tuned alignment model from the Hugging Face Hub
+      - huggingface_hub>=0.20,<2  # 2.x needs click>=8.4, which kraken 7.1.1 rejects

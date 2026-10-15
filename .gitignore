@@ -212,6 +212,10 @@ __marimo__/
 ticha_images/
 auto/
 review/
+# ...except the review decisions kept in the repository
+!/review/
+/review/*
+!/review/decisions.txt
 lines/
 ticha_augmented/
 
