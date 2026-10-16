@@ -223,3 +223,7 @@ ticha_augmented/
 data/
 # Contact sheets written by `ticha-scraper check`
 check/
+
+# Local secrets: GCP service-account key and the VM Jupyter URL (contains its token)
+key.json
+.jupyter-vm-url

@@ -6,6 +6,7 @@ from pathlib import Path
 from .core.scraper import TichaScraper
 from .core.text_scraper import TichaTextScraper
 from .core.image_scraper import TichaImageScraper
+from .core.printed_scraper import TichaPrintedScraper, write_corpus
 from .core.augmentation import Augmenter, DatasetAugmenter, load_targets
 from .core.check import SELECTIONS, check_pairing
 from .core.review import apply_review
@@ -175,6 +176,37 @@ def scrape_images(args):
     except Exception as e:
         print(f"Error: {e}")
         sys.exit(1)
+
+
+def scrape_printed(args):
+    """Download the text of Ticha's printed works (no images or PDFs)."""
+    scraper = TichaPrintedScraper(rate_limit=args.rate_limit)
+    try:
+        if args.list:
+            works = scraper.list_works()
+            for work in works.itertuples():
+                print(f"{work.slug:24} {work.title}")
+            return
+        print("Starting Ticha printed-text scraper...")
+        pages = scraper.scrape(Path(args.output), works=args.work, max_pages=args.max_pages)
+    except KeyboardInterrupt:
+        print("\nInterrupted by user (pages saved so far are kept; run again to resume)")
+        sys.exit(1)
+    except Exception as e:
+        print(f"Error: {e}")
+        sys.exit(1)
+    finally:
+        scraper.close()
+
+    print(f"Pages saved to: {Path(args.output).absolute()}")
+    for slug, group in pages.groupby("slug"):
+        chars = int(group["transcription"].fillna("").str.len().sum())
+        print(f"- {slug}: {group['transcription'].notna().sum()} of {len(group)} pages "
+              f"with text, {chars:,} characters")
+    if args.corpus_dir:
+        paths = write_corpus(pages, Path(args.corpus_dir), column=args.corpus_column)
+        print(f"Plain-text corpus ({args.corpus_column}): {len(paths)} files in "
+              f"{Path(args.corpus_dir).absolute()}")
 
 
 def pair_lines(args):
@@ -373,6 +405,29 @@ def main():
     images_parser.add_argument('-v', '--verbose', action='store_true',
                              help='Enable verbose logging')
 
+    # Printed command
+    printed_parser = subparsers.add_parser(
+        'printed', help='Download the text of the printed works (artes, catechism, Agüero)')
+    printed_parser.add_argument('-o', '--output', type=str, default='ticha_printed.csv',
+                                help='Output CSV, one row per page; existing pages are skipped '
+                                     '(default: ticha_printed.csv)')
+    printed_parser.add_argument('-w', '--work', action='append',
+                                help='Only this work slug, e.g. aguero-miscelaneo (repeatable; '
+                                     'default: all, see --list)')
+    printed_parser.add_argument('--list', action='store_true',
+                                help='List the printed works available and exit')
+    printed_parser.add_argument('--corpus-dir', type=str, default=None,
+                                help='Also write one plain-text file per work here')
+    printed_parser.add_argument('--corpus-column', default='transcription',
+                                choices=['transcription', 'transcription_regular', 'zapotec_marked'],
+                                help='Text written to --corpus-dir (default: transcription)')
+    printed_parser.add_argument('--max-pages', type=int, default=None,
+                                help='Maximum pages per work (default: all)')
+    printed_parser.add_argument('-r', '--rate-limit', type=float, default=2.0,
+                                help='Rate limit in seconds between requests (default: 2.0)')
+    printed_parser.add_argument('-v', '--verbose', action='store_true',
+                                help='Enable verbose logging')
+
     # Lines command
     lines_parser = subparsers.add_parser(
         'lines', help='Segment images into lines and pair them with transcriptions (kraken)')
@@ -498,6 +553,8 @@ def main():
         scrape_texts(args)
     elif args.command == 'images':
         scrape_images(args)
+    elif args.command == 'printed':
+        scrape_printed(args)
     elif args.command == 'lines':
         pair_lines(args)
     elif args.command == 'check':
