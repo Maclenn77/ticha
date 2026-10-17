@@ -28,6 +28,8 @@ import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+from dataset_exclusions import DATASET_VERSION, EXCLUDED_DOCS
+
 ROOT = Path(__file__).resolve().parents[1]
 SHARD_BYTES = 300 * 1024 * 1024
 
@@ -90,6 +92,7 @@ def write_shards(rows: pd.DataFrame, spec: dict, folder: Path, split: str) -> li
 
 def original_rows(data: Path, split: str, meta: pd.DataFrame) -> pd.DataFrame:
     lines = pd.read_csv(data / "splits" / split / "lines.csv", keep_default_na=False)
+    lines = lines[~lines["doc_id"].isin(EXCLUDED_DOCS)]
     lines["id"] = [line_id(d, p, n) for d, p, n in zip(lines["doc_id"], lines["page"], lines["line"])]
     lines["image_path"] = lines["image"]
     lines = lines.merge(meta, left_on="doc_id", right_index=True, how="left").fillna("")
@@ -104,6 +107,8 @@ def augmented_rows(data: Path, name: str, originals: pd.DataFrame) -> pd.DataFra
     by_image = originals.set_index("image")
     rows = []
     for _, aug in index.iterrows():
+        if aug["source"] not in by_image.index:  # copy of a line from an excluded document
+            continue
         src = by_image.loc[aug["source"]]
         out = Path(aug["output"])
         params = json.loads(aug["params"])
@@ -177,6 +182,8 @@ def write_samples(data: Path, out: Path, originals: pd.DataFrame) -> str:
 def card(counts: dict, repo_id: str, examples: str = "") -> str:
     o, a = counts["original"], counts["augmented"]
     total = sum(o.values())
+    excluded_note = "Removed from train (with their augmented copies): " + "; ".join(
+        f"`{doc_id}`, {reason}" for doc_id, reason in EXCLUDED_DOCS.items())
     return f"""---
 license: cc-by-nc-sa-4.0
 language:
@@ -232,7 +239,8 @@ The code that downloads the pages, pairs the lines and builds this dataset is at
 | `augmented` | `test_degraded` | {a['test_degraded']:,} | One `degrade` copy of each test line, no geometric changes |
 
 The splits are made by **document**: no document appears in two splits. Within each language, documents are
-assigned so that lines are close to 80/10/10 ({total:,} original lines in total).
+assigned so that lines are close to 80/10/10 ({total:,} original lines in total). Ticha lists a few manuscripts
+twice under different ids; when the copies fall into different splits, the train copy is left out (see Versions).
 
 Augmented data is a separate config so it is never mixed in by accident. To train with it, concatenate
 `original/train` and `augmented/train`; validate on `original/validation`. Evaluate on `original/test` (real
@@ -248,6 +256,17 @@ train = concatenate_datasets([original["train"], augmented["train"]])
 ```
 
 {examples}
+## Versions
+
+| Version | Revision | Changes |
+|---|---|---|
+| 1.0 | [`b9747c9`](https://huggingface.co/datasets/{repo_id}/tree/b9747c957ff1a642d86fdb7f5a4cbc717a249e20) (2026-10-12) | First release |
+| {DATASET_VERSION} | this revision | {excluded_note} |
+
+Validation and test are unchanged, so scores on them are comparable across versions. Models trained on version
+1.0 have seen the pages of Za687: leave that document out when evaluating them on the test split. Load a
+specific version with `load_dataset("{repo_id}", "original", revision="<revision>")`.
+
 ## Fields
 
 `original`:
