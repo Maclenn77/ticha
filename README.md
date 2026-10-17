@@ -87,6 +87,27 @@ print(result["image_paths"])
 
 Images are written to `<output-dir>/<document>/page_001.png`, ...
 
+### Text of the printed works (`printed` command)
+
+Downloads only the transcriptions (no images or PDFs) of the printed works
+in Ticha's texts menu: Agüero's *Misceláneo espiritual*, Córdova's *Arte*,
+and Levanto's *Arte* and *Cathecismo*. This is extra Zapotec text, for
+example to train a language model or the embeddings of a decoder. The
+testaments featured on the site are already handled by the `texts` command.
+
+```bash
+ticha-scraper printed --list                                   # works available
+ticha-scraper printed -o printed.csv --corpus-dir printed_corpus
+ticha-scraper printed -o printed.csv -w aguero-miscelaneo      # one work
+```
+
+`printed.csv` has one row per page: `transcription` (original spelling),
+`transcription_regular` (Ticha's regularized version, when there is one) and
+`zapotec_marked` (the words Ticha glossed, which in the *Artes* are the
+Zapotec forms inside the Spanish text). Glosses and catchwords are removed.
+Pages already in the CSV are skipped, so you can resume an interrupted run.
+`--corpus-dir` also writes one `.txt` per work.
+
 ### Line-level dataset for HTR (`lines` command)
 
 Segments the downloaded page images into lines with
