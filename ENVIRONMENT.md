@@ -119,3 +119,62 @@ conda env export -n ticha --no-builds | grep -v '^prefix:' > environment.osx-arm
 ```
 
 To remove it: `conda env remove -n ticha` and `jupyter kernelspec remove ticha`.
+
+## TrOCR fine-tuning on a GPU VM
+
+[`notebooks/ticha_trocr_finetuning.ipynb`](notebooks/ticha_trocr_finetuning.ipynb)
+fine-tunes `microsoft/trocr-base-handwritten` on the
+[`maclenn77/ticha-htr-lines`](https://huggingface.co/datasets/maclenn77/ticha-htr-lines)
+dataset from the Hub, so it doesn't need `data/` or the conda environment. It
+runs in Google Colab (installs its packages itself, saves to Drive) or on a
+CUDA machine with [`requirements-trocr.txt`](requirements-trocr.txt).
+
+Tested on a GCP VM: `g2-standard-8` with one NVIDIA L4 (23 GB), Deep Learning
+VM image `pytorch-2-9-cu129-ubuntu-2204-nvidia-580` (Python 3.10, PyTorch
+2.9.1+cu129). The notebook uses batch size 8 and bf16 on the L4 (2 x 4
+gradient accumulation and fp16 on a 16 GB T4); one training epoch takes about
+4 minutes.
+
+### Create the VM
+
+L4s are often out of stock (`ZONE_RESOURCE_POOL_EXHAUSTED`); try another zone
+or add `--provisioning-model SPOT`:
+
+```bash
+gcloud compute instances create ticha-l4 --zone us-central1-a \
+  --machine-type g2-standard-8 --accelerator type=nvidia-l4,count=1 \
+  --maintenance-policy TERMINATE --boot-disk-size 150GB \
+  --image-family pytorch-2-9-cu129-ubuntu-2204-nvidia-580 \
+  --image-project deeplearning-platform-release \
+  --metadata install-nvidia-driver=True
+```
+
+### Set it up
+
+On the VM (`gcloud compute ssh ticha-l4 --zone us-central1-a`). The venv
+reuses the image's CUDA PyTorch through `--system-site-packages`:
+
+```bash
+git clone https://github.com/maclenn77/ticha.git && cd ticha
+python3 -m venv --system-site-packages ~/venvs/ticha
+~/venvs/ticha/bin/pip install -r requirements-trocr.txt
+~/venvs/ticha/bin/python -m ipykernel install --user --name ticha-trocr --display-name "Python (ticha-trocr)"
+```
+
+### Open Jupyter through an SSH tunnel
+
+Don't open a firewall port for Jupyter. Run it on the VM's localhost only and
+forward the port over SSH:
+
+```bash
+# on the VM (stops when you log out; use tmux or a systemd user service to keep it running)
+~/venvs/ticha/bin/jupyter lab --ip=127.0.0.1 --port=8888 --no-browser
+
+# on your computer: keep this running, then open http://localhost:8888
+gcloud compute ssh ticha-l4 --zone us-central1-a -- -N -L 8888:localhost:8888
+```
+
+Outputs go to `~/ticha-runs/` on the VM (set `TICHA_OUTPUT_DIR` to change it).
+Copy results back with `gcloud compute scp --recurse ticha-l4:ticha-runs/... .`
+and stop the VM when you're done, since it is billed while running:
+`gcloud compute instances stop ticha-l4 --zone us-central1-a`.
