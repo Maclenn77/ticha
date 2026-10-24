@@ -146,8 +146,12 @@ After changing `environment.yml`:
 ```bash
 conda env update -n ticha -f environment.yml --prune
 python -m pytest -q
-conda env export -n ticha --no-builds | grep -v -e '^prefix:' -e '^  - defaults$' > environment.osx-arm64.lock.yml   # on macOS arm64
+conda env export -n ticha --no-builds | grep -v -e '^prefix:' -e '^  - defaults$' -e '^      - ticha==' > environment.osx-arm64.lock.yml   # on macOS arm64
 ```
+
+The export leaves out the `ticha` package itself, which is not on PyPI (it is
+only there if you ran `pip install -e .`); `tests/test_environment_lock.py`
+checks that.
 
 To remove it: `conda env remove -n ticha` and `jupyter kernelspec remove ticha`.
 
