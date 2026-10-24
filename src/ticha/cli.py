@@ -1,15 +1,14 @@
-"""Command line interface for Ticha scraper."""
+"""Command line interface: the `ticha` command."""
 
 import argparse
 import sys
 from pathlib import Path
-from .core.scraper import TichaScraper
-from .core.text_scraper import TichaTextScraper
-from .core.image_scraper import TichaImageScraper
-from .core.printed_scraper import TichaPrintedScraper, write_corpus
+
+import pandas as pd
+
 from .core.augmentation import Augmenter, DatasetAugmenter, load_targets
 from .core.check import SELECTIONS, check_pairing
-from .core.review import apply_review
+from .core.image_scraper import TichaImageScraper
 from .core.line_pairing import (
     DEFAULT_MODEL,
     DEFAULT_STATUSES,
@@ -17,8 +16,12 @@ from .core.line_pairing import (
     KrakenSegmenter,
     LinePairer,
 )
+from .core.printed_scraper import TichaPrintedScraper, write_corpus
+from .core.review import apply_review
+from .core.scraper import TichaScraper
+from .core.text_scraper import TichaTextScraper
 from .utils.citation import generate_citation_info
-import pandas as pd
+
 
 def scrape_manuscripts(args):
     """Scrape manuscript list."""
@@ -46,7 +49,7 @@ def scrape_manuscripts(args):
         
         # Generate citation info
         citation = generate_citation_info("https://ticha.haverford.edu/en/texts/handwritten/")
-        print(f"\nCitation info:")
+        print("\nCitation info:")
         print(f"Source: {citation['source']}")
         print(f"URL: {citation['url']}")
         print(f"Access date: {citation['access_date']}")
@@ -111,7 +114,7 @@ def scrape_texts(args):
             print(f"Data saved to: {output_path.absolute()}")
             
             # Show some statistics
-            print(f"\nContent statistics:")
+            print("\nContent statistics:")
             for column, label in [
                 ('transcription', 'transcription'),
                 ('interlinear', 'interlinear analysis'),
@@ -376,7 +379,7 @@ def main():
     texts_parser.add_argument('--max-docs', type=int, default=None,
                             help='Maximum number of documents to scrape (default: all)')
     texts_parser.add_argument('--no-headless', action='store_true',
-                            help='Run browser in non-headless mode (visible)')
+                            help='Ignored: texts are downloaded without a browser (kept for compatibility)')
     texts_parser.add_argument('-v', '--verbose', action='store_true',
                             help='Enable verbose logging')
     
@@ -474,7 +477,7 @@ def main():
     lines_parser.add_argument('-v', '--verbose', action='store_true',
                             help='Enable verbose logging')
 
-    # Augment command
+    # Check command
     check_parser = subparsers.add_parser(
         'check', help='Draw sample line crops with their paired text, to check the pairing')
     check_parser.add_argument('-d', '--dataset', type=str, default='ticha_lines',
@@ -543,10 +546,9 @@ def main():
 
     args = parser.parse_args()
     
-    # Handle verbose logging
-    if hasattr(args, 'verbose') and args.verbose:
-        import logging
-        logging.basicConfig(level=logging.DEBUG)
+    # Progress at INFO; -v adds DEBUG
+    import logging
+    logging.basicConfig(level=logging.DEBUG if getattr(args, 'verbose', False) else logging.INFO)
     
     # Handle commands
     if args.command == 'manuscripts':

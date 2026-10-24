@@ -16,6 +16,12 @@ unchanged.
   (paginated) texts, translations, interlinear analysis and more document
   metadata.
 - New package description, keywords and classifiers.
+- `environment.yml` covers everything that runs locally (pipeline, scripts,
+  tests, usage example, report notebooks): it adds transformers, datasets,
+  jiwer, matplotlib and pyarrow, pins huggingface_hub and click, and installs
+  every package except Python and Jupyter from pip, so conda's numpy can't
+  clash with PyTorch's OpenMP runtime.
+- Pillow 10.1 or newer is required.
 
 ### Added
 
@@ -35,7 +41,11 @@ unchanged.
 - `scripts/build_dataset.py` and `scripts/export_hf_dataset.py`: the
   train / validation / test splits and their export to the Hugging Face Hub.
 - Notebooks for the data pipeline, TrOCR training, evaluation and report
-  metrics.
+  metrics. Each training notebook has a clean copy and a `.with-outputs` run
+  record. Experiments left out of the report are not published.
+- The data pipeline notebook builds steps 6-10 with the functions of
+  `scripts/build_dataset.py`, so it reproduces the published dataset v1.1
+  (documents in `scripts/dataset_exclusions.py` left out).
 
 ### Fixed
 

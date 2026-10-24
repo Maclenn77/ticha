@@ -36,10 +36,10 @@ from PIL import Image
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
+from dataset_exclusions import DATASET_VERSION, EXCLUDED_DOCS  # noqa: E402
+
 from ticha.core.augmentation import Augmenter, DatasetAugmenter  # noqa: E402
 from ticha.core.line_pairing import crop_line  # noqa: E402
-
-from dataset_exclusions import DATASET_VERSION, EXCLUDED_DOCS  # noqa: E402
 
 SPLIT_RATIOS = {"train": 0.8, "validation": 0.1, "test": 0.1}
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".tif", ".tiff"}

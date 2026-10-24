@@ -1,10 +1,16 @@
-# Environment for the dataset pipeline
+# Environments
 
-How to reproduce the environment used to run
-[`notebooks/ticha_pipeline.ipynb`](notebooks/ticha_pipeline.ipynb)
-(download → summary → line pairing → review → splits → augmentation).
+Two environments:
 
-The notebook imports the code from `src/` in this repository, so the `ticha`
+- **`ticha`** (this page, `environment.yml`): everything that runs locally.
+  That covers the dataset pipeline
+  [`notebooks/ticha_data_preparation_pipeline.ipynb`](notebooks/ticha_data_preparation_pipeline.ipynb)
+  (download → summary → line pairing → review → splits → augmentation), the
+  scripts, the tests, the usage example and the report notebooks.
+- **`ticha-trocr`** (`requirements-trocr.txt`): TrOCR training on a GPU
+  machine; see [TrOCR fine-tuning on a GPU VM](#trocr-fine-tuning-on-a-gpu-vm).
+
+The notebooks import the code from `src/` in this repository, so the `ticha`
 package does **not** need to be installed: clone the repo, create the
 environment, run the notebook.
 
@@ -37,7 +43,7 @@ Then start Jupyter and open the notebook with the **Python (ticha)** kernel
 (the notebook already asks for it):
 
 ```bash
-jupyter lab notebooks/ticha_pipeline.ipynb
+jupyter lab notebooks/ticha_data_preparation_pipeline.ipynb
 ```
 
 The first code cell checks that `ticha` is imported from this repo's `src/`
@@ -47,7 +53,7 @@ and stops otherwise.
 
 | File | Use |
 |---|---|
-| [`environment.yml`](environment.yml) | The requirements (minimum versions; kraken pinned). Works on macOS, Linux and Windows. Use this one normally. |
+| [`environment.yml`](environment.yml) | The requirements (minimum versions; kraken, transformers and the packages that conflict pinned). Works on macOS, Linux and Windows. Use this one normally. |
 | [`environment.osx-arm64.lock.yml`](environment.osx-arm64.lock.yml) | Exact versions of every package in the environment the pipeline was tested with, on macOS / Apple Silicon. Use it to reproduce results exactly on that platform: `conda env create -f environment.osx-arm64.lock.yml` |
 
 Main versions in the tested environment:
@@ -57,10 +63,15 @@ Main versions in the tested environment:
 | Python | 3.12.15 |
 | kraken | 7.1.1 |
 | PyTorch / torchvision | 2.14.0 / 0.29.1 |
+| transformers | 4.46.3 |
+| datasets | 3.6.0 |
+| huggingface_hub | 0.36.2 |
+| click | 8.2.1 |
 | pandas | 2.3.3 |
 | numpy | 2.4.6 |
 | Pillow | 12.3.0 |
 | selenium | 4.51.0 |
+| matplotlib | 3.11.2 |
 | JupyterLab | 4.6.4 |
 
 ### Why these versions
@@ -73,6 +84,17 @@ Main versions in the tested environment:
 - **Python 3.12**: supported by kraken 6 (`<3.13`) and 7 (`<3.14`).
 - **PyTorch comes from pip** (as a kraken dependency), which has the Apple
   Silicon (MPS) and CUDA builds.
+- **Everything except Python and Jupyter comes from pip.** Conda's numpy uses
+  an OpenBLAS built with OpenMP, and its OpenMP runtime clashes with the one
+  bundled in PyTorch's pip wheel: `import torch` stops with `OMP: Error #15`.
+  The pip wheels of numpy, pandas and Pillow don't have that problem. For the
+  same reason, add packages to this environment with `pip install`, never with
+  `conda install`.
+- **transformers 4.46.3**: the version the models were trained with
+  (`requirements-trocr.txt`). It needs **huggingface_hub < 1**, and kraken
+  7.1.1 needs **click < 8.3**; huggingface_hub 2.x would need click 8.4. Both
+  are pinned so that installing something else can't upgrade them.
+- **datasets < 4**: the range used to train the models.
 
 ## Speeding up step 4 (GPU and parallel workers)
 
@@ -105,7 +127,7 @@ Everything the notebook downloads or produces goes to `data/` in the repo
 (ignored by git). To keep it elsewhere, e.g. on an external disk:
 
 ```bash
-TICHA_DATA=/Volumes/disk/ticha-data jupyter lab notebooks/ticha_pipeline.ipynb
+TICHA_DATA=/Volumes/disk/ticha-data jupyter lab notebooks/ticha_data_preparation_pipeline.ipynb
 ```
 
 ## Updating the environment
@@ -174,7 +196,7 @@ forward the port over SSH:
 gcloud compute ssh ticha-l4 --zone us-central1-a -- -N -L 8888:localhost:8888
 ```
 
-Outputs go to `~/ticha-runs/` on the VM (set `TICHA_OUTPUT_DIR` to change it).
+Outputs go to `~/ticha-runs/` on the VM (set `TICHA_RUNS_DIR` to change it; every training and report notebook reads it).
 Copy results back with `gcloud compute scp --recurse ticha-l4:ticha-runs/... .`
 and stop the VM when you're done, since it is billed while running:
 `gcloud compute instances stop ticha-l4 --zone us-central1-a`.

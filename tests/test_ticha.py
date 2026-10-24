@@ -1,9 +1,9 @@
 """Tests for the Ticha scraper."""
 
+from unittest.mock import Mock, patch
+
 import pytest
-import pandas as pd
-from unittest.mock import Mock, patch, MagicMock
-from selenium.common.exceptions import NoSuchElementException, TimeoutException
+from selenium.common.exceptions import NoSuchElementException
 
 from ticha.core.scraper import TichaScraper
 

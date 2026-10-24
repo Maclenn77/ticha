@@ -8,9 +8,9 @@ from PIL import Image
 
 from ticha.core.line_pairing import (
     PAGE_NS,
+    DocTask,
     Line,
     LinePairer,
-    DocTask,
     PageImage,
     align,
     align_words,

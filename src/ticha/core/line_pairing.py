@@ -35,6 +35,7 @@ Output (``output_dir``):
 - ``manifest.csv`` (one row per page) and ``lines.csv`` (one row per line).
 """
 
+import bisect
 import hashlib
 import json
 import logging
@@ -134,20 +135,6 @@ def normalize_folio(folio: Optional[str]) -> Optional[str]:
         return None
     folio = re.sub(r"[\s\(\)\[\]]", "", str(folio)).lower()
     return re.sub(r"^0+(?=\d)", "", folio)
-
-
-def normalize_for_matching(text: str) -> str:
-    """
-    Reduce a line to what a generic HTR model and Ticha agree on.
-
-    Drops editorial additions (``q[ue]``, ``(...)``, ``(rao?)``), accents,
-    case, punctuation and spaces (word separation in the manuscripts is
-    irregular), and merges letters used interchangeably (u/v, i/j/y).
-    """
-    text = re.sub(r"\[[^\]]*\]|\([^)]*\)", "", text)
-    text = unicodedata.normalize("NFD", text.lower())
-    text = "".join(c for c in text if c.isalnum() and not unicodedata.combining(c))
-    return text.translate(str.maketrans("vjy", "uii"))
 
 
 _EDITORIAL_RE = re.compile(r"\[[^\]]*\]|\([^)]*\)")
@@ -442,8 +429,6 @@ def _word_band(
     for word in words:
         word_starts.append(pos)
         pos += len(word.norm)
-
-    import bisect
 
     lo, hi, pos = [], [], 0
     for i in range(len(readings) + 1):
@@ -1178,8 +1163,8 @@ class LinePairer:
                 (None, texts[j], len(normalize_for_matching(texts[j])))
                 for j in range(k, len(texts))
             ]
+            segmented = len(sequence)
             for page in pages:
-                segmented = sum(len(p.main) for p in pages)
                 page.reasons.append(
                     f"line count mismatch: {segmented} segmented, "
                     f"{len(texts)} transcribed"
@@ -1270,7 +1255,7 @@ class LinePairer:
             k for i in ambiguous for k in (pairs[i][1], pairs[i + 1][1])
         }
 
-        for index, (_, k, a, b, d) in enumerate(pairs):
+        for index, (_, k, _, _, _) in enumerate(pairs):
             line = sequence[k][1]
             own, d = cut[k].norm, cut[k].distance
             line.cer = d / len(own) if own else (0.0 if not reads[k] else 1.0)

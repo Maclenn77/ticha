@@ -27,7 +27,6 @@ from pathlib import Path
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
-
 from dataset_exclusions import DATASET_VERSION, EXCLUDED_DOCS
 
 ROOT = Path(__file__).resolve().parents[1]
