@@ -66,7 +66,7 @@ def scrape_texts(args):
     # Load manuscript DataFrame
     if not Path(args.input).exists():
         print(f"Error: Input file {args.input} not found")
-        print("First run: ticha-scraper manuscripts -o manuscripts.csv")
+        print("First run: ticha manuscripts -o manuscripts.csv")
         sys.exit(1)
     
     try:
@@ -146,7 +146,7 @@ def scrape_images(args):
             sys.exit(1)
     else:
         print("Error: provide --url or an existing --input CSV")
-        print("First run: ticha-scraper manuscripts -o manuscripts.csv")
+        print("First run: ticha manuscripts -o manuscripts.csv")
         sys.exit(1)
 
     image_scraper = TichaImageScraper(rate_limit=args.rate_limit, tile_workers=args.tile_workers)
@@ -347,7 +347,9 @@ def augment_dataset(args):
 
 def main():
     """Main CLI function."""
-    parser = argparse.ArgumentParser(description='Scrape Ticha Colonial Zapotec manuscript data')
+    parser = argparse.ArgumentParser(
+        prog='ticha',
+        description='Colonial Zapotec manuscripts from Ticha: scraping, line dataset and augmentation')
     
     # Create subparsers for different commands
     subparsers = parser.add_subparsers(dest='command', help='Available commands')
@@ -566,6 +568,12 @@ def main():
     else:
         parser.print_help()
         sys.exit(1)
+
+
+def deprecated_main():
+    """Entry point of the old ``ticha-scraper`` command."""
+    print("ticha-scraper is deprecated and will be removed in 2.0; use ticha.", file=sys.stderr)
+    main()
 
 
 if __name__ == "__main__":

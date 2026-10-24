@@ -1,56 +1,55 @@
 # Ticha
 
-A Python package for scraping Colonial Zapotec manuscript data from the Ticha Digital Text Explorer.
+Tools for the Colonial Zapotec manuscripts of the
+[Ticha Digital Text Explorer](https://ticha.haverford.edu/): download the
+manuscripts and their transcriptions, build a line-level handwritten text
+recognition (HTR) dataset from them, and read new lines with fine-tuned TrOCR
+models.
+
+| Stage | Command / module | Output |
+|---|---|---|
+| Scrape | `ticha manuscripts`, `texts`, `images`, `printed` | CSVs of metadata and transcriptions, page images |
+| Segment and pair | `ticha lines` (`ticha.core.line_pairing`) | PAGE XML + line crops paired with their text |
+| Review | `ticha check`, `ticha review` | contact sheets; reviewed PAGE XML |
+| Augment | `ticha augment` (`ticha.core.augmentation`) | degraded and varied copies of the lines |
+| Build the dataset | `scripts/build_dataset.py`, `scripts/export_hf_dataset.py` | train / validation / test splits, [`maclenn77/ticha-htr-lines`](https://huggingface.co/datasets/maclenn77/ticha-htr-lines) |
+| Recognize | `ticha.core.htr` | text of a line image, with [`maclenn77/ticha-trocr-base`](https://huggingface.co/maclenn77/ticha-trocr-base) |
 
 ## Installation
 
-```bash
-pip install ticha-scraper
-```
+The package is not on PyPI; install it from the repository (Python 3.10+):
 
-For development:
 ```bash
 git clone https://github.com/maclenn77/ticha.git
 cd ticha
-pip install -e .[dev]
+pip install -e .            # scrapers
+pip install -e '.[lines]'   # + segmentation and pairing (kraken)
+pip install -e '.[htr]'     # + TrOCR recognition (torch, transformers)
+pip install -e '.[dev]'     # + tests and linters
 ```
+
+The notebooks use the conda environment described in
+[`ENVIRONMENT.md`](ENVIRONMENT.md).
+
+Before 1.0 the command was called `ticha-scraper`. It still works, with a
+deprecation warning, and will be removed in 2.0.
 
 ## Usage
 
-### Python API
-
-```python
-from ticha_scraper import TichaScraper
-import pandas as pd
-
-# Create scraper instance
-scraper = TichaScraper(rate_limit=2.0)
-
-# Scrape all manuscript data
-df = scraper.scrape_manuscripts()
-
-# Work with the DataFrame
-print(f"Found {len(df)} manuscripts")
-print(df.head())
-
-# Save to CSV
-df.to_csv('manuscripts.csv', index=False)
-```
-
-### Command Line Interface
+### Manuscript list (`manuscripts` command)
 
 ```bash
-# Basic usage
-ticha-scraper -o manuscripts.csv
+ticha manuscripts -o manuscripts.csv
+ticha manuscripts -o manuscripts.csv -r 3.0 -v   # 3 s between requests, verbose
+ticha manuscripts -o manuscripts.csv --no-headless   # show the browser
+```
 
-# With custom rate limiting
-ticha-scraper -o manuscripts.csv -r 3.0
+```python
+from ticha import TichaScraper
 
-# Verbose output
-ticha-scraper -o manuscripts.csv -v
-
-# Run with visible browser (non-headless)
-ticha-scraper -o manuscripts.csv --no-headless
+scraper = TichaScraper(rate_limit=2.0)
+df = scraper.scrape_manuscripts()
+df.to_csv("manuscripts.csv", index=False)
 ```
 
 ### Downloading page images
@@ -71,10 +70,10 @@ The original PDF is tried first (one attempt) unless `--skip-pdf` is given.
 
 ```bash
 # One document
-ticha-scraper images -u https://ticha.haverford.edu/en/texts/Oc111/ -d images
+ticha images -u https://ticha.haverford.edu/en/texts/Oc111/ -d images
 
 # All documents from the manuscripts CSV, max 3000px per side, plus a PDF per document
-ticha-scraper images -i manuscripts.csv -d images --max-dimension 3000 --pdf
+ticha images -i manuscripts.csv -d images --max-dimension 3000 --pdf
 ```
 
 ```python
@@ -96,9 +95,9 @@ example to train a language model or the embeddings of a decoder. The
 testaments featured on the site are already handled by the `texts` command.
 
 ```bash
-ticha-scraper printed --list                                   # works available
-ticha-scraper printed -o printed.csv --corpus-dir printed_corpus
-ticha-scraper printed -o printed.csv -w aguero-miscelaneo      # one work
+ticha printed --list                                   # works available
+ticha printed -o printed.csv --corpus-dir printed_corpus
+ticha printed -o printed.csv -w aguero-miscelaneo      # one work
 ```
 
 `printed.csv` has one row per page: `transcription` (original spelling),
@@ -116,9 +115,9 @@ Segments the downloaded page images into lines with
 ```bash
 pip install 'ticha[lines]'   # installs kraken (and PyTorch)
 
-ticha-scraper texts  -i manuscripts.csv -o texts.csv
-ticha-scraper images -i manuscripts.csv -d images -o images.csv
-ticha-scraper lines  -t texts.csv -i images.csv -d dataset --export-lines
+ticha texts  -i manuscripts.csv -o texts.csv
+ticha images -i manuscripts.csv -d images -o images.csv
+ticha lines  -t texts.csv -i images.csv -d dataset --export-lines
 ```
 
 `-w N` processes N documents in parallel, each in its own process with its
@@ -176,12 +175,12 @@ the reviewed PAGE XML, which the dataset build uses for those pages. The
 review of the published dataset is in `review/decisions.txt`:
 
 ```bash
-ticha-scraper review -d data/paired --decisions review/decisions.txt -o data/reviewed
+ticha review -d data/paired --decisions review/decisions.txt -o data/reviewed
 ```
 
 #### Reproducing the published dataset
 
-`notebooks/ticha_pipeline.ipynb` runs every step. The pieces that make the
+[`notebooks/ticha_data_preparation_pipeline.ipynb`](notebooks/ticha_data_preparation_pipeline.ipynb) runs every step. The pieces that make the
 result reproducible:
 
 - **Segmentation:** kraken's default baseline model, fixed by `kraken==7.1.1`
@@ -196,7 +195,7 @@ result reproducible:
 
 #### Building the train / validation / test dataset
 
-`scripts/build_dataset.py` (steps 6-10 of `notebooks/ticha_pipeline.ipynb`)
+`scripts/build_dataset.py` (steps 6-10 of `notebooks/ticha_data_preparation_pipeline.ipynb`)
 takes the `auto/` pages and the pages corrected by hand in `data/reviewed/`,
 splits the documents 80/10/10 (by lines, within each language) and cuts the
 lines. Augmented copies are kept in a separate folder:
@@ -222,9 +221,9 @@ reading and the CER (green: confident, red: doubtful, gray: no text), to
 see whether the pairs are right before training on them:
 
 ```bash
-ticha-scraper check -d dataset --only doubtful -n 30            # 30 doubtful lines
-ticha-scraper check -d dataset --only confident -s auto -n 45   # what goes to training
-ticha-scraper check -d dataset --doc SDE740dT -n 0 -o check/SDE740dT.png  # a whole document
+ticha check -d dataset --only doubtful -n 30            # 30 doubtful lines
+ticha check -d dataset --only confident -s auto -n 45   # what goes to training
+ticha check -d dataset --doc SDE740dT -n 0 -o check/SDE740dT.png  # a whole document
 ```
 
 Sheets are written as `check/check_001.png`, `check/check_002.png`, ...
@@ -263,8 +262,8 @@ Augments the confidently paired line images written by
 paired with; nothing is segmented or aligned again.
 
 ```bash
-ticha-scraper lines   -t texts.csv -i images.csv -d dataset --export-lines
-ticha-scraper augment -d dataset -o augmented -n 4 --seed 1
+ticha lines   -t texts.csv -i images.csv -d dataset --export-lines
+ticha augment -d dataset -o augmented -n 4 --seed 1
 ```
 
 Two kinds of copies (`--degrade-ratio`, default half and half):
@@ -294,12 +293,44 @@ lines and transforming their coordinates), e.g. to train segmentation.
 Split train/validation/test **by document before augmenting**, so copies of
 the same line never end up on both sides.
 
-### Full pipeline notebook
+### Handwritten text recognition (`ticha.core.htr`)
 
-[`notebooks/ticha_pipeline.ipynb`](notebooks/ticha_pipeline.ipynb) runs every
-step, from downloading to the final train/validation/test dataset with
-augmentation and metrics, using the code in `src/` directly. Set up its conda
-environment as described in [`ENVIRONMENT.md`](ENVIRONMENT.md).
+Reads line images with TrOCR base fine-tuned on the Ticha lines. The model
+proposes its 10 best readings with beam search and a second model, trained to
+write each line right to left, reranks them. Both are in
+[`maclenn77/ticha-trocr-base`](https://huggingface.co/maclenn77/ticha-trocr-base).
+
+```bash
+pip install -e '.[htr]'
+```
+
+```python
+from ticha.core.htr import LineReader, clean_text
+
+reader = LineReader.from_pretrained()          # rerank=False: left-to-right model only
+reader.transcribe("line.png")                  # one image -> str
+reader.transcribe(["a.png", "b.png"])          # several -> list of str
+
+clean_text("p[es]os de Dom(ing)o")             # Ticha transcription -> diplomatic text
+```
+
+`clean_text` is the rule the models were trained and evaluated with: it
+removes expansions and glosses and returns `None` for lines with damage or
+editorial notes.
+
+### Notebooks
+
+- [`notebooks/ticha_data_preparation_pipeline.ipynb`](notebooks/ticha_data_preparation_pipeline.ipynb):
+  every step from downloading to the final train/validation/test dataset with
+  augmentation, using the code in `src/` directly.
+- [`notebooks/train/`](notebooks/train): TrOCR fine-tuning, the right-to-left
+  reranker, an ablation and a usage example. Experiments left out of the
+  report are in `notebooks/train/no_reported/`.
+- [`notebooks/reports/`](notebooks/reports): evaluation of the models and the
+  metrics in the report.
+
+Set up their conda environment as described in [`ENVIRONMENT.md`](ENVIRONMENT.md);
+GPU training on a VM is covered there too.
 
 ## Data Structure
 
@@ -319,7 +350,7 @@ The scraper extracts the following columns based on the Ticha website table stru
 
 ### Text content (`texts` command)
 
-`ticha-scraper texts -i manuscripts.csv -o texts.csv` adds these columns to
+`ticha texts -i manuscripts.csv -o texts.csv` adds these columns to
 each manuscript row (empty when the site has no such text):
 
 - `transcription`: transcribed text, line breaks preserved
@@ -336,14 +367,14 @@ the texts are joined in order, metadata comes from their `overview` page, and
 
 ## Requirements
 
-- Python 3.9+
-- Chrome browser (for Selenium WebDriver)
-- pandas
-- selenium
+- Python 3.10+
+- Chrome (for the Selenium-based `manuscripts` and `texts` commands)
+- `lines` extra: kraken and PyTorch
+- `htr` extra: PyTorch and transformers
 
 ## Ethical Usage
 
-This scraper is designed for academic research purposes. Please:
+This package is designed for academic research purposes. Please:
 
 - Use respectful rate limiting (default 2 seconds between requests)
 - Cite the Ticha project in your research
@@ -352,7 +383,7 @@ This scraper is designed for academic research purposes. Please:
 
 ## Citation
 
-When using data scraped with this tool, please cite:
+When using data downloaded with this tool, please cite:
 
 > Ticha: a digital text explorer for Colonial Zapotec. Brook Danielle Lillehaugen, George Aaron Broadwell, et al. https://ticha.haverford.edu/
 

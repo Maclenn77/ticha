@@ -1,7 +1,7 @@
 """Pair segmented manuscript lines with their Ticha transcriptions.
 
-Input: the CSVs written by ``ticha-scraper texts`` (transcriptions) and
-``ticha-scraper images`` (page images). Pipeline per document:
+Input: the CSVs written by ``ticha texts`` (transcriptions) and
+``ticha images`` (page images). Pipeline per document:
 
 1. Clean: keep documents with a transcription (and, optionally, a given
    transcription status).

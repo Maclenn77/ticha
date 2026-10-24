@@ -1,7 +1,7 @@
 """Apply a line-by-line review to the pages the pairer sent to ``review/``.
 
 A decisions file records what a reviewer decided for each line, so the review
-can be applied again to a fresh run of ``ticha-scraper lines`` (same
+can be applied again to a fresh run of ``ticha lines`` (same
 segmentation, same recognition model) without redoing it by hand::
 
     # doc page line action [text]

@@ -1,6 +1,6 @@
 """Contact sheets to check line pairing by eye.
 
-Reads the output of ``ticha-scraper lines`` (``manifest.csv``, ``lines.csv``
+Reads the output of ``ticha lines`` (``manifest.csv``, ``lines.csv``
 and the PAGE XML files) and draws a sample of line crops, each with the
 transcription paired with it, the HTR reading and its CER. Confident pairs
 are labelled in green, doubtful ones in red and lines without text in gray.

@@ -303,7 +303,7 @@ original line), `preset` (`degrade` or `variety`) and `params` (JSON with every 
    cool cast, faded brown ink, washed-out or underexposed tone, uneven light, stains); `variety` adds
    brightness, contrast, blur, noise, JPEG compression, small rotation, slant, scale and elastic distortion.
 
-Code: [Maclenn77/ticha](https://github.com/Maclenn77/ticha) (`ticha-scraper lines`, `scripts/build_dataset.py`,
+Code: [Maclenn77/ticha](https://github.com/Maclenn77/ticha) (`ticha lines`, `scripts/build_dataset.py`,
 `scripts/export_hf_dataset.py`).
 
 ## Limitations
