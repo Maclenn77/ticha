@@ -26,7 +26,7 @@ description = "Colonial Zapotec manuscripts from Ticha: scraping, a line-level H
 readme = "README.md"
 license = "MIT"
 authors = [
-    {name = "J. P. Péreztejada", email = "maclenn77@gmail.com"},
+    {name = "Juan Paulo Pérez-Tejada", email = "maclenn77@gmail.com"},
 ]
 keywords = ["zapotec", "manuscripts", "digital humanities", "web scraping", "htr", "ocr", "trocr", "kraken", "low-resource languages"]
 classifiers = [
