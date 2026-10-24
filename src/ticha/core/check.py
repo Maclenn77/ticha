@@ -106,7 +106,9 @@ def _row_image(
 ) -> Image.Image:
     crop = crop_line(page, boundary)
     scale = min(1.0, width / crop.width)
-    crop = crop.resize((max(1, int(crop.width * scale)), max(1, int(crop.height * scale))))
+    crop = crop.resize(
+        (max(1, int(crop.width * scale)), max(1, int(crop.height * scale)))
+    )
     size = font.size if hasattr(font, "size") else 20
     canvas = Image.new("RGB", (width, crop.height + 3 * size + 16), "white")
     canvas.paste(crop, (0, 0))
@@ -156,7 +158,9 @@ def draw_sheets(
     paths = []
     for start in range(0, len(images), per_sheet):
         chunk = images[start : start + per_sheet]
-        sheet = Image.new("RGB", (width, sum(im.height + 12 for im in chunk)), "#d0d7de")
+        sheet = Image.new(
+            "RGB", (width, sum(im.height + 12 for im in chunk)), "#d0d7de"
+        )
         y = 0
         for im in chunk:
             sheet.paste(im, (0, y))

@@ -62,7 +62,10 @@ def read_page_lines(xml_path: Path) -> list:
         coords = children(el, "Coords")
         if not coords or not coords[0].get("points"):
             continue
-        boundary = [[int(float(v)) for v in p.split(",")] for p in coords[0].get("points").split()]
+        boundary = [
+            [int(float(v)) for v in p.split(",")]
+            for p in coords[0].get("points").split()
+        ]
         text, conf = None, None
         for equiv in children(el, "TextEquiv"):
             unicode_ = children(equiv, "Unicode")
@@ -70,7 +73,9 @@ def read_page_lines(xml_path: Path) -> list:
                 text = unicode_[0].text.strip()
                 conf = float(equiv.get("conf")) if equiv.get("conf") else None
                 break
-        lines.append({"id": el.get("id"), "boundary": boundary, "text": text, "conf": conf})
+        lines.append(
+            {"id": el.get("id"), "boundary": boundary, "text": text, "conf": conf}
+        )
     return lines
 
 
@@ -82,13 +87,19 @@ def usable(line: dict, source: str, min_conf: float) -> bool:
 
 
 def page_image(xml_path: Path) -> Path:
-    found = [p for p in xml_path.parent.glob(xml_path.stem + ".*") if p.suffix.lower() in IMAGE_EXTS]
+    found = [
+        p
+        for p in xml_path.parent.glob(xml_path.stem + ".*")
+        if p.suffix.lower() in IMAGE_EXTS
+    ]
     if not found:
         raise FileNotFoundError(f"No image for {xml_path}")
     return found[0]
 
 
-def write_clean_xml(source: Path, target: Path, image_name: str, kind: str, min_conf: float) -> None:
+def write_clean_xml(
+    source: Path, target: Path, image_name: str, kind: str, min_conf: float
+) -> None:
     """Copy a PAGE XML pointing to image_name, keeping text only on usable lines."""
     tree = ET.parse(source)
     root = tree.getroot()
@@ -103,8 +114,10 @@ def write_clean_xml(source: Path, target: Path, image_name: str, kind: str, min_
         for equiv in children(el, "TextEquiv"):
             unicode_ = children(equiv, "Unicode")
             if unicode_ and (unicode_[0].text or "").strip():
-                line.update(text=unicode_[0].text.strip(),
-                            conf=float(equiv.get("conf")) if equiv.get("conf") else None)
+                line.update(
+                    text=unicode_[0].text.strip(),
+                    conf=float(equiv.get("conf")) if equiv.get("conf") else None,
+                )
                 break
         keep = usable(line, kind, min_conf)
         for equiv in children(el, "TextEquiv"):
@@ -144,17 +157,32 @@ def final_pages(data: Path, include_unreviewed: bool, min_conf: float) -> pd.Dat
             kind = "pending review"
         n = 0
         if kind != "pending review":
-            n = sum(usable(ln, kind, min_conf) and len(ln["boundary"]) >= 3 for ln in read_page_lines(xml))
-        rows.append({"doc_id": row["doc_id"], "page": int(row["page"]), "stem": xml.stem, "source": kind,
-                     "language": language_of.get(row["doc_id"], "(unknown)"),
-                     "xml": str(xml), "image": str(image), "usable_lines": n})
+            n = sum(
+                usable(ln, kind, min_conf) and len(ln["boundary"]) >= 3
+                for ln in read_page_lines(xml)
+            )
+        rows.append(
+            {
+                "doc_id": row["doc_id"],
+                "page": int(row["page"]),
+                "stem": xml.stem,
+                "source": kind,
+                "language": language_of.get(row["doc_id"], "(unknown)"),
+                "xml": str(xml),
+                "image": str(image),
+                "usable_lines": n,
+            }
+        )
     return pd.DataFrame(rows)
 
 
 def split_documents(pages: pd.DataFrame, seed: int) -> pd.DataFrame:
     """Step 7: documents to subsets, balancing lines within each language."""
-    table = pages.groupby("doc_id").agg(language=("language", "first"), pages=("page", "size"),
-                                        lines=("usable_lines", "sum"))
+    table = pages.groupby("doc_id").agg(
+        language=("language", "first"),
+        pages=("page", "size"),
+        lines=("usable_lines", "sum"),
+    )
     rng = random.Random(seed)
     assignment = {}
     for _, group in table.groupby("language"):
@@ -162,14 +190,19 @@ def split_documents(pages: pd.DataFrame, seed: int) -> pd.DataFrame:
         rng.shuffle(ids)
         filled = {s: 0 for s in SPLIT_RATIOS}
         for doc_id in ids:
-            split = min(SPLIT_RATIOS, key=lambda s: (filled[s] / SPLIT_RATIOS[s], -SPLIT_RATIOS[s]))
+            split = min(
+                SPLIT_RATIOS,
+                key=lambda s: (filled[s] / SPLIT_RATIOS[s], -SPLIT_RATIOS[s]),
+            )
             assignment[doc_id] = split
             filled[split] += group.loc[doc_id, "lines"]
     table["split"] = table.index.map(assignment)
     return table
 
 
-def cut_lines(pages: pd.DataFrame, table: pd.DataFrame, splits_dir: Path, min_conf: float) -> pd.DataFrame:
+def cut_lines(
+    pages: pd.DataFrame, table: pd.DataFrame, splits_dir: Path, min_conf: float
+) -> pd.DataFrame:
     """Step 8: final pages and line crops of each subset."""
     rows = []
     for split in SPLIT_RATIOS:
@@ -181,21 +214,42 @@ def cut_lines(pages: pd.DataFrame, table: pd.DataFrame, splits_dir: Path, min_co
         (out / "auto").mkdir(parents=True, exist_ok=True)
         image_name = f"{page['stem']}{image_src.suffix}"
         link_or_copy(image_src, out / "auto" / image_name)
-        write_clean_xml(xml_src, out / "auto" / f"{page['stem']}.xml", image_name, page["source"], min_conf)
+        write_clean_xml(
+            xml_src,
+            out / "auto" / f"{page['stem']}.xml",
+            image_name,
+            page["source"],
+            min_conf,
+        )
         crops = out / "lines" / page["stem"]
         crops.mkdir(parents=True, exist_ok=True)
         with Image.open(image_src) as im:
             number = 0
             for line in read_page_lines(xml_src):
-                if not (usable(line, page["source"], min_conf) and len(line["boundary"]) >= 3):
+                if not (
+                    usable(line, page["source"], min_conf)
+                    and len(line["boundary"]) >= 3
+                ):
                     continue
                 number += 1
                 crop = crops / f"line_{number:03d}.png"
                 crop_line(im, line["boundary"]).save(crop)
-                crop.with_name(crop.stem + ".gt.txt").write_text(line["text"] + "\n", encoding="utf-8")
-                rows.append({"split": split, "doc_id": page["doc_id"], "language": page["language"],
-                             "page": page["page"], "source": page["source"], "line": number,
-                             "text": line["text"], "conf": line["conf"], "image": str(crop)})
+                crop.with_name(crop.stem + ".gt.txt").write_text(
+                    line["text"] + "\n", encoding="utf-8"
+                )
+                rows.append(
+                    {
+                        "split": split,
+                        "doc_id": page["doc_id"],
+                        "language": page["language"],
+                        "page": page["page"],
+                        "source": page["source"],
+                        "line": number,
+                        "text": line["text"],
+                        "conf": line["conf"],
+                        "image": str(crop),
+                    }
+                )
     lines = pd.DataFrame(rows)
     for split, group in lines.groupby("split"):
         group.to_csv(splits_dir / split / "lines.csv", index=False)
@@ -209,38 +263,72 @@ def write_list(files, path: Path) -> int:
 
 
 def line_images(folder: Path):
-    return (p for p in folder.rglob("*.png") if p.with_name(p.stem + ".gt.txt").exists())
+    return (
+        p for p in folder.rglob("*.png") if p.with_name(p.stem + ".gt.txt").exists()
+    )
 
 
-def augment_job(splits_dir: Path, aug_dir: Path, seed: int, min_conf: float, job) -> int:
+def augment_job(
+    splits_dir: Path, aug_dir: Path, seed: int, min_conf: float, job
+) -> int:
     """Augment one split into ``aug_dir/<name>`` and list its line images in ``aug_dir/<name>.txt``."""
     split, name, copies, ratio, geometry, offset = job
-    augmenter = DatasetAugmenter(Augmenter(seed=seed + offset), copies=copies, degrade_ratio=ratio,
-                                 min_conf=min_conf, include_review=True, geometry=geometry)
+    augmenter = DatasetAugmenter(
+        Augmenter(seed=seed + offset),
+        copies=copies,
+        degrade_ratio=ratio,
+        min_conf=min_conf,
+        include_review=True,
+        geometry=geometry,
+    )
     augmenter.run(splits_dir / split, aug_dir / name)
     count = write_list(line_images(aug_dir / name / "lines"), aug_dir / f"{name}.txt")
-    print(f"{name}: {count} augmented lines ({copies} per {split} line, "
-          f"{round(100 * ratio)}% degrade{'' if geometry else ', no geometry'})")
+    print(
+        f"{name}: {count} augmented lines ({copies} per {split} line, "
+        f"{round(100 * ratio)}% degrade{'' if geometry else ', no geometry'})"
+    )
     return count
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     parser.add_argument("--data", type=Path, default=ROOT / "data")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--min-conf", type=float, default=0.5)
-    parser.add_argument("--include-unreviewed", action="store_true",
-                        help="Use confident lines of review pages without a reviewed XML")
-    parser.add_argument("--copies", type=int, default=4, help="Augmented copies per train line")
-    parser.add_argument("--degrade-ratio", type=float, default=0.5,
-                        help="Share of train copies using the degrade preset (rest: variety)")
-    parser.add_argument("--test-degraded-copies", type=int, default=1,
-                        help="Degraded copies per test line (0: no degraded test set)")
-    parser.add_argument("--validation-degraded-copies", type=int, default=1,
-                        help="Degraded copies per validation line (0: no degraded validation set)")
-    parser.add_argument("--only-validation-degraded", action="store_true",
-                        help="Only (re)build augmented/validation_degraded from the existing splits/validation, "
-                             "without cutting the splits again or touching the other augmented sets")
+    parser.add_argument(
+        "--include-unreviewed",
+        action="store_true",
+        help="Use confident lines of review pages without a reviewed XML",
+    )
+    parser.add_argument(
+        "--copies", type=int, default=4, help="Augmented copies per train line"
+    )
+    parser.add_argument(
+        "--degrade-ratio",
+        type=float,
+        default=0.5,
+        help="Share of train copies using the degrade preset (rest: variety)",
+    )
+    parser.add_argument(
+        "--test-degraded-copies",
+        type=int,
+        default=1,
+        help="Degraded copies per test line (0: no degraded test set)",
+    )
+    parser.add_argument(
+        "--validation-degraded-copies",
+        type=int,
+        default=1,
+        help="Degraded copies per validation line (0: no degraded validation set)",
+    )
+    parser.add_argument(
+        "--only-validation-degraded",
+        action="store_true",
+        help="Only (re)build augmented/validation_degraded from the existing splits/validation, "
+        "without cutting the splits again or touching the other augmented sets",
+    )
     parser.add_argument("--no-augment", action="store_true")
     args = parser.parse_args()
 
@@ -250,20 +338,38 @@ def main() -> None:
 
     if args.only_validation_degraded:
         if not list((splits_dir / "validation" / "lines").rglob("*.gt.txt")):
-            raise SystemExit("splits/validation/lines is empty or missing: run the full build first")
+            raise SystemExit(
+                "splits/validation/lines is empty or missing: run the full build first"
+            )
         if not args.validation_degraded_copies:
-            raise SystemExit("--only-validation-degraded needs --validation-degraded-copies >= 1")
+            raise SystemExit(
+                "--only-validation-degraded needs --validation-degraded-copies >= 1"
+            )
         shutil.rmtree(aug_dir / "validation_degraded", ignore_errors=True)
-        augment_job(splits_dir, aug_dir, args.seed, args.min_conf,
-                    ("validation", "validation_degraded", args.validation_degraded_copies, 1.0, False, 2))
+        augment_job(
+            splits_dir,
+            aug_dir,
+            args.seed,
+            args.min_conf,
+            (
+                "validation",
+                "validation_degraded",
+                args.validation_degraded_copies,
+                1.0,
+                False,
+                2,
+            ),
+        )
         return
 
     pages = final_pages(data, args.include_unreviewed, args.min_conf)
     pages.to_csv(reports / "final_pages.csv", index=False)
     pending = pages[pages["source"] == "pending review"]
     pages = pages[(pages["source"] != "pending review") & (pages["usable_lines"] > 0)]
-    print(f"Pages used: {len(pages)} ({int(pages['usable_lines'].sum())} lines); "
-          f"by source: {pages['source'].value_counts().to_dict()}; pending review: {len(pending)}")
+    print(
+        f"Pages used: {len(pages)} ({int(pages['usable_lines'].sum())} lines); "
+        f"by source: {pages['source'].value_counts().to_dict()}; pending review: {len(pending)}"
+    )
 
     table = split_documents(pages, args.seed)
     # Excluded after the split, so every other document keeps the split it had before.
@@ -276,7 +382,9 @@ def main() -> None:
     table.to_csv(splits_dir / "splits.csv")
     lines = cut_lines(pages, table, splits_dir, args.min_conf)
     for split in SPLIT_RATIOS:
-        write_list(line_images(splits_dir / split / "lines"), splits_dir / f"{split}.txt")
+        write_list(
+            line_images(splits_dir / split / "lines"), splits_dir / f"{split}.txt"
+        )
 
     aug_counts = {}
     if not args.no_augment:
@@ -285,41 +393,81 @@ def main() -> None:
         # one set never changes the images of another.
         jobs = [("train", "train", args.copies, args.degrade_ratio, True, 0)]
         if args.test_degraded_copies:
-            jobs.append(("test", "test_degraded", args.test_degraded_copies, 1.0, False, 1))
+            jobs.append(
+                ("test", "test_degraded", args.test_degraded_copies, 1.0, False, 1)
+            )
         if args.validation_degraded_copies:
-            jobs.append(("validation", "validation_degraded", args.validation_degraded_copies, 1.0, False, 2))
+            jobs.append(
+                (
+                    "validation",
+                    "validation_degraded",
+                    args.validation_degraded_copies,
+                    1.0,
+                    False,
+                    2,
+                )
+            )
         for job in jobs:
-            aug_counts[job[1]] = augment_job(splits_dir, aug_dir, args.seed, args.min_conf, job)
+            aug_counts[job[1]] = augment_job(
+                splits_dir, aug_dir, args.seed, args.min_conf, job
+            )
 
     lines["chars"] = lines["text"].str.len()
-    metrics = pd.DataFrame({
-        "documents": lines.groupby("split")["doc_id"].nunique(),
-        "pages": lines.groupby("split")[["doc_id", "page"]].apply(lambda g: len(g.drop_duplicates())),
-        "lines": lines.groupby("split").size(),
-        "characters": lines.groupby("split")["chars"].sum(),
-        "lines from reviewed pages": lines[lines["source"] == "reviewed"].groupby("split").size(),
-    }).reindex(SPLIT_RATIOS).fillna(0).astype(int)
+    metrics = (
+        pd.DataFrame(
+            {
+                "documents": lines.groupby("split")["doc_id"].nunique(),
+                "pages": lines.groupby("split")[["doc_id", "page"]].apply(
+                    lambda g: len(g.drop_duplicates())
+                ),
+                "lines": lines.groupby("split").size(),
+                "characters": lines.groupby("split")["chars"].sum(),
+                "lines from reviewed pages": lines[lines["source"] == "reviewed"]
+                .groupby("split")
+                .size(),
+            }
+        )
+        .reindex(SPLIT_RATIOS)
+        .fillna(0)
+        .astype(int)
+    )
     metrics["% lines"] = (100 * metrics["lines"] / metrics["lines"].sum()).round(1)
     metrics.to_csv(reports / "final_metrics.csv")
     print(metrics.to_string())
     print("Lines per language:")
-    print(lines.pivot_table(index="language", columns="split", values="line", aggfunc="size",
-                            fill_value=0).reindex(columns=list(SPLIT_RATIOS), fill_value=0).to_string())
+    print(
+        lines.pivot_table(
+            index="language",
+            columns="split",
+            values="line",
+            aggfunc="size",
+            fill_value=0,
+        )
+        .reindex(columns=list(SPLIT_RATIOS), fill_value=0)
+        .to_string()
+    )
     train_chars = set("".join(lines.loc[lines["split"] == "train", "text"]))
     for split in ("validation", "test"):
         unseen = set("".join(lines.loc[lines["split"] == split, "text"])) - train_chars
-        print(f"Characters in {split} missing from train: {''.join(sorted(unseen)) or '(none)'}")
+        print(
+            f"Characters in {split} missing from train: {''.join(sorted(unseen)) or '(none)'}"
+        )
 
     summary = {
-        "pages": int(len(pages)), "pages pending review": int(len(pending)),
+        "pages": int(len(pages)),
+        "pages pending review": int(len(pending)),
         "lines": {s: int(metrics.loc[s, "lines"]) for s in SPLIT_RATIOS},
         "documents": {s: int(metrics.loc[s, "documents"]) for s in SPLIT_RATIOS},
         "augmented lines": aug_counts,
         "dataset version": DATASET_VERSION,
         "excluded documents": {doc_id: EXCLUDED_DOCS[doc_id] for doc_id in excluded},
-        "config": {k: (str(v) if isinstance(v, Path) else v) for k, v in vars(args).items()},
+        "config": {
+            k: (str(v) if isinstance(v, Path) else v) for k, v in vars(args).items()
+        },
     }
-    (reports / "final_metrics.json").write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
+    (reports / "final_metrics.json").write_text(
+        json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
 
 
 if __name__ == "__main__":

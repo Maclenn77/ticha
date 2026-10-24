@@ -39,7 +39,9 @@ METADATA_HTML = """
 """
 
 # /en/texts/<id>/ layout: transcription as raw text + <br/>
-HANDWRITTEN_HTML = METADATA_HTML + """
+HANDWRITTEN_HTML = (
+    METADATA_HTML
+    + """
 <div role="tabpanel" class="tab-pane" id="transcription">
 
   (8r) <br/>
@@ -55,6 +57,7 @@ HANDWRITTEN_HTML = METADATA_HTML + """
   available.</p>
 </div>
 """
+)
 
 # /en/text/<id>/<n>/ layout: one page per URL, pageMap lists the pages
 FEATURED_PAGE_HTML = """
@@ -219,10 +222,12 @@ def test_scrape_documents_from_dataframe():
         f"{BASE}/en/texts/A2/": HANDWRITTEN_HTML,
     }
     scraper = TichaTextScraper(rate_limit=0, session=fake_session(pages))
-    df = pd.DataFrame({
-        "document_name": ["Doc 1", "Doc 2", "No link"],
-        "document_link": ["/en/texts/A1/", "/en/texts/A2/", None],
-    })
+    df = pd.DataFrame(
+        {
+            "document_name": ["Doc 1", "Doc 2", "No link"],
+            "document_link": ["/en/texts/A1/", "/en/texts/A2/", None],
+        }
+    )
     result_df = scraper.scrape_documents_from_dataframe(df)
     assert len(result_df) == 2
     assert "document_name" in result_df.columns  # Original columns preserved

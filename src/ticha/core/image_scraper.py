@@ -434,7 +434,9 @@ class TichaImageScraper:
 
         def fetch(position: tuple) -> Image.Image:
             col, row = position
-            tile = Image.open(BytesIO(self._get(info.tile_url(level, col, row)).content))
+            tile = Image.open(
+                BytesIO(self._get(info.tile_url(level, col, row)).content)
+            )
             tile.load()
             if self.tile_delay:
                 time.sleep(self.tile_delay)
@@ -469,10 +471,15 @@ class TichaImageScraper:
         image = self.stitch_dzi(info, level)
         output_path = Path(output_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        save_kwargs = {"quality": 95} if output_path.suffix.lower() in (
-            ".jpg",
-            ".jpeg",
-        ) else {}
+        save_kwargs = (
+            {"quality": 95}
+            if output_path.suffix.lower()
+            in (
+                ".jpg",
+                ".jpeg",
+            )
+            else {}
+        )
         # Write to a temporary file first: an interrupted save never leaves a
         # truncated image that a later run would skip as already downloaded.
         partial = output_path.with_name(f"{output_path.stem}.part{output_path.suffix}")
@@ -545,12 +552,15 @@ class TichaImageScraper:
         try:
             html = self._get(document_url).content
             output_dir = Path(output_dir)
-            stem = re.sub(
-                r"[^\w\-]+",
-                "_",
-                ticha_id_from_url(document_url)
-                or document_url.rstrip("/").split("/")[-1],
-            ) or "document"
+            stem = (
+                re.sub(
+                    r"[^\w\-]+",
+                    "_",
+                    ticha_id_from_url(document_url)
+                    or document_url.rstrip("/").split("/")[-1],
+                )
+                or "document"
+            )
 
             if try_pdf:
                 for pdf_url in self.find_pdf_links(html, document_url):
@@ -584,9 +594,8 @@ class TichaImageScraper:
                     logger.error(f"Failed page {page} of {document_url}: {e}")
                     result["missing_folios"].append(folio_from_source(source, stem))
             if result["missing_folios"] and not result["image_paths"]:
-                result["error"] = (
-                    f"All {len(sources)} pages failed: "
-                    + ";".join(result["missing_folios"])
+                result["error"] = f"All {len(sources)} pages failed: " + ";".join(
+                    result["missing_folios"]
                 )
 
             if make_pdf and result["image_paths"] and not result["pdf_path"]:

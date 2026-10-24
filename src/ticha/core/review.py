@@ -42,12 +42,16 @@ class Decision:
 def read_decisions(path: Path) -> Dict[Key, Decision]:
     """Parse a decisions file: ``doc page line action [text]`` per line."""
     decisions: Dict[Key, Decision] = {}
-    for number, raw in enumerate(Path(path).read_text(encoding="utf-8").splitlines(), 1):
+    for number, raw in enumerate(
+        Path(path).read_text(encoding="utf-8").splitlines(), 1
+    ):
         if not raw.strip() or raw.lstrip().startswith("#"):
             continue
         parts = raw.split(" ", 4)
         if len(parts) < 4 or parts[3] not in ACTIONS:
-            raise ValueError(f"{path}:{number}: expected 'doc page line keep|drop|fix [text]'")
+            raise ValueError(
+                f"{path}:{number}: expected 'doc page line keep|drop|fix [text]'"
+            )
         doc, page, line, action = parts[:4]
         text = parts[4].strip() if len(parts) > 4 else None
         if action == "fix" and not text:
@@ -62,7 +66,9 @@ def _q(tag: str) -> str:
 
 def main_lines(root: ET.Element) -> list:
     """Non-fragment TextLines of a page, in reading order (line ids l1, l2...)."""
-    lines = [el for el in root.iter(_q("TextLine")) if "fragment" not in el.get("custom", "")]
+    lines = [
+        el for el in root.iter(_q("TextLine")) if "fragment" not in el.get("custom", "")
+    ]
     return sorted(lines, key=lambda el: int(re.sub(r"\D", "", el.get("id")) or 0))
 
 
@@ -83,7 +89,11 @@ def apply_to_page(
     for number, el in enumerate(main_lines(root), 1):
         equiv = el.find(_q("TextEquiv"))
         text = equiv.findtext(_q("Unicode")) if equiv is not None else None
-        conf = float(equiv.get("conf")) if equiv is not None and equiv.get("conf") else None
+        conf = (
+            float(equiv.get("conf"))
+            if equiv is not None and equiv.get("conf")
+            else None
+        )
         decision = decisions.get((doc_id, page, number))
         if decision and decision.action == "fix":
             new = decision.text
@@ -140,15 +150,32 @@ def apply_review(
         page = int(row["page"])
         used.update(k for k in decisions if k[0] == row["doc_id"] and k[1] == page)
         if skip_existing and (reviewed_dir / xml.name).exists():
-            rows.append({"doc_id": row["doc_id"], "page": page, "kept": 0, "fixed": 0,
-                         "dropped": 0, "skipped": True})
+            rows.append(
+                {
+                    "doc_id": row["doc_id"],
+                    "page": page,
+                    "kept": 0,
+                    "fixed": 0,
+                    "dropped": 0,
+                    "skipped": True,
+                }
+            )
             continue
-        counts = apply_to_page(xml, reviewed_dir / xml.name, row["doc_id"], page,
-                               decisions, min_conf, note)
+        counts = apply_to_page(
+            xml, reviewed_dir / xml.name, row["doc_id"], page, decisions, min_conf, note
+        )
         rows.append({"doc_id": row["doc_id"], "page": page, **counts, "skipped": False})
-    result = pd.DataFrame(rows, columns=["doc_id", "page", "kept", "fixed", "dropped", "skipped"])
+    result = pd.DataFrame(
+        rows, columns=["doc_id", "page", "kept", "fixed", "dropped", "skipped"]
+    )
     result.attrs["unused"] = sorted(set(decisions) - used)
     return result
 
 
-__all__: Iterable[str] = ["Decision", "read_decisions", "apply_to_page", "apply_review", "main_lines"]
+__all__: Iterable[str] = [
+    "Decision",
+    "read_decisions",
+    "apply_to_page",
+    "apply_review",
+    "main_lines",
+]

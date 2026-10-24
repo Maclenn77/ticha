@@ -526,8 +526,13 @@ def align_words(
 
     if cost[n][m] == inf:  # the window missed the path: align without it
         return align_words(
-            readings, words, skip_line_cost, skip_word_cost, break_penalty,
-            band, max_states=(n + 1) * (m + 1),
+            readings,
+            words,
+            skip_line_cost,
+            skip_word_cost,
+            break_penalty,
+            band,
+            max_states=(n + 1) * (m + 1),
         )
 
     steps: List[AlignStep] = []
@@ -555,7 +560,9 @@ class _Cut:
     the next line (``tail``).
     """
 
-    def __init__(self, texts: Sequence[str], words: Sequence[Word], a: int, b: int, d: int):
+    def __init__(
+        self, texts: Sequence[str], words: Sequence[Word], a: int, b: int, d: int
+    ):
         self.texts, self.words = texts, words
         self.start, self.end = a, b
         self.head = self.tail = ("", "")  # (text, normalized)
@@ -1246,21 +1253,30 @@ class LinePairer:
                 ambiguous.add(i)
 
         cut = {k: _Cut(texts, words, a, b, d) for _, k, a, b, d in pairs}
-        for i, ((_, k1, _, b1, _), (_, k2, a2, _, _)) in enumerate(zip(pairs, pairs[1:])):
-            if b1 == a2 and not words[a2].line_start and _split_broken_word(
-                sequence[k1][1].reading or "", reads[k1], reads[k2], cut[k1], cut[k2]
+        for i, ((_, k1, _, b1, _), (_, k2, a2, _, _)) in enumerate(
+            zip(pairs, pairs[1:])
+        ):
+            if (
+                b1 == a2
+                and not words[a2].line_start
+                and _split_broken_word(
+                    sequence[k1][1].reading or "",
+                    reads[k1],
+                    reads[k2],
+                    cut[k1],
+                    cut[k2],
+                )
             ):
                 ambiguous.discard(i)  # the split settled where the line breaks
-        ambiguous_lines = {
-            k for i in ambiguous for k in (pairs[i][1], pairs[i + 1][1])
-        }
+        ambiguous_lines = {k for i in ambiguous for k in (pairs[i][1], pairs[i + 1][1])}
 
         for index, (_, k, _, _, _) in enumerate(pairs):
             line = sequence[k][1]
             own, d = cut[k].norm, cut[k].distance
             line.cer = d / len(own) if own else (0.0 if not reads[k] else 1.0)
             neighbours = [
-                pairs[j][1] for j in (index - 2, index - 1, index + 1, index + 2)
+                pairs[j][1]
+                for j in (index - 2, index - 1, index + 1, index + 2)
                 if 0 <= j < len(pairs)
             ]
             if neighbours:
@@ -1319,9 +1335,16 @@ class LinePairer:
     def _restore(page: PageResult, snapshot: Tuple[Any, ...]) -> None:
         lines, texts, unpaired_texts, unpaired_chars = snapshot
         for line, (text, error, margin, confident) in zip(page.main, lines):
-            line.text, line.cer, line.margin, line.confident = text, error, margin, confident
+            line.text, line.cer, line.margin, line.confident = (
+                text,
+                error,
+                margin,
+                confident,
+            )
         page.texts, page.unpaired_texts, page.unpaired_chars = (
-            list(texts), unpaired_texts, unpaired_chars
+            list(texts),
+            unpaired_texts,
+            unpaired_chars,
         )
 
     def _retry_other_folios(
@@ -1354,14 +1377,13 @@ class LinePairer:
             for folio, candidate in folios:
                 if candidate == texts:
                     continue
-                self._restore(page, ([(None, None, None, False)] * len(page.main), [], 0, 0))
+                self._restore(
+                    page, ([(None, None, None, False)] * len(page.main), [], 0, 0)
+                )
                 self._pair_unit([page], candidate)
                 count = self._confident_count(page)
                 paired_now = sum(1 for ln in page.main if ln.text)
-                if (
-                    count >= max(2 * best_count, 5)
-                    and count >= 0.5 * paired_now
-                ):
+                if count >= max(2 * best_count, 5) and count >= 0.5 * paired_now:
                     best_count, best, best_folio = count, self._snapshot(page), folio
             self._restore(page, best)
             if best_folio:

@@ -62,15 +62,19 @@ def response(text="", status=200):
 
 def scraper_with(pages):
     session = Mock(headers={})
-    session.get.side_effect = lambda url, timeout=None: pages.get(url, response(status=404))
+    session.get.side_effect = lambda url, timeout=None: pages.get(
+        url, response(status=404)
+    )
     return TichaPrintedScraper(rate_limit=0, session=session), session
 
 
 def test_html_to_text_drops_glosses_and_catchwords():
     result = html_to_text(CORDOVA_PAGE)
 
-    assert result["text"] == ("verbales. V.g. Dizen nina, chija, mi amado,\n"
-                              "el de aquel. Y tam-\nbien\n\nDE LOS PRONOMBRES")
+    assert result["text"] == (
+        "verbales. V.g. Dizen nina, chija, mi amado,\n"
+        "el de aquel. Y tam-\nbien\n\nDE LOS PRONOMBRES"
+    )
     assert "REL" not in result["text"] and "ver-" not in result["text"]
     assert result["marked"] == "nina, chija"
 
@@ -78,7 +82,9 @@ def test_html_to_text_drops_glosses_and_catchwords():
 def test_html_to_text_keeps_sibling_divs():
     html = " <div>\n  Nijaxtenni toobi peaazi.\n </div>\n <div>\n  Discipulo| Channa!\n </div>"
 
-    assert html_to_text(html)["text"] == "Nijaxtenni toobi peaazi.\n\nDiscipulo| Channa!"
+    assert (
+        html_to_text(html)["text"] == "Nijaxtenni toobi peaazi.\n\nDiscipulo| Channa!"
+    )
 
 
 def test_html_to_text_ignores_transcription_form():
@@ -104,7 +110,9 @@ def test_list_works_finds_printed_texts_only():
 
 
 def test_scrape_page_uses_json():
-    payload = json.dumps({"transcription": CORDOVA_PAGE, "transcription_regular": "", "n": "5v"})
+    payload = json.dumps(
+        {"transcription": CORDOVA_PAGE, "transcription_regular": "", "n": "5v"}
+    )
     scraper, _ = scraper_with({f"{BASE}/texts/cordova-arte/10/json": response(payload)})
 
     row = scraper.scrape_page("cordova-arte", 10, "Cordova, Arte")
@@ -117,15 +125,18 @@ def test_scrape_page_uses_json():
 
 def test_scrape_page_falls_back_to_page_html():
     empty = json.dumps({"transcription": "", "transcription_regular": "", "n": "1"})
-    scraper, _ = scraper_with({
-        f"{BASE}/texts/aguero-miscelaneo/1/json": response(empty),
-        f"{BASE}/en/texts/aguero-miscelaneo/1/original/": response(AGUERO_HTML),
-    })
+    scraper, _ = scraper_with(
+        {
+            f"{BASE}/texts/aguero-miscelaneo/1/json": response(empty),
+            f"{BASE}/en/texts/aguero-miscelaneo/1/original/": response(AGUERO_HTML),
+        }
+    )
 
     row = scraper.scrape_page("aguero-miscelaneo", 1)
 
-    assert row["transcription"] == ("gabijlla ní raaqui, ni richoohuij Bezeeloo.\n\n"
-                                    "Discipulo| Channa Maestrohe!")
+    assert row["transcription"] == (
+        "gabijlla ní raaqui, ni richoohuij Bezeeloo.\n\n" "Discipulo| Channa Maestrohe!"
+    )
 
 
 def test_scrape_resumes_and_writes_corpus(tmp_path):
@@ -136,11 +147,14 @@ def test_scrape_resumes_and_writes_corpus(tmp_path):
     }
     for n in range(3):
         pages[f"{BASE}/texts/aguero-miscelaneo/{n}/json"] = response(empty)
-        pages.setdefault(f"{BASE}/en/texts/aguero-miscelaneo/{n}/original/", response(AGUERO_HTML))
+        pages.setdefault(
+            f"{BASE}/en/texts/aguero-miscelaneo/{n}/original/", response(AGUERO_HTML)
+        )
     scraper, session = scraper_with(pages)
     output = tmp_path / "printed.csv"
-    pd.DataFrame([{"slug": "aguero-miscelaneo", "page": 0, "transcription": "ya"}]).to_csv(
-        output, index=False)
+    pd.DataFrame(
+        [{"slug": "aguero-miscelaneo", "page": 0, "transcription": "ya"}]
+    ).to_csv(output, index=False)
 
     result = scraper.scrape(output, works=["aguero-miscelaneo"])
 

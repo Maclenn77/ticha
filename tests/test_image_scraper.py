@@ -24,8 +24,11 @@ def make_source_image(width, height):
     """Image with a distinct color per pixel so misplaced tiles are detected."""
     img = Image.new("RGB", (width, height))
     img.putdata(
-        [((x * 7) % 256, (y * 13) % 256, (x + y) % 256)
-         for y in range(height) for x in range(width)]
+        [
+            ((x * 7) % 256, (y * 13) % 256, (x + y) % 256)
+            for y in range(height)
+            for x in range(width)
+        ]
     )
     return img
 
@@ -174,9 +177,7 @@ def test_find_image_sources():
     assert (inline.width, inline.height, inline.tile_size) == (4000, 3000, 254)
 
 
-def test_download_document_falls_back_when_pdf_fails(
-    scraper_with_pyramid, tmp_path
-):
+def test_download_document_falls_back_when_pdf_fails(scraper_with_pyramid, tmp_path):
     scraper, files = scraper_with_pyramid
     page_url = f"{BASE}/en/texts/doc1/"
     files[page_url] = (
@@ -206,8 +207,9 @@ def test_download_images_from_dataframe(scraper_with_pyramid, tmp_path):
     scraper, files = scraper_with_pyramid
     page_url = f"{BASE}/en/texts/doc1/"
     files[page_url] = b'<div data-dzi="/static/dzi/doc1/page1.dzi"></div>'
-    df = pd.DataFrame({"document_name": ["Doc 1", "No link"],
-                       "document_link": [page_url, None]})
+    df = pd.DataFrame(
+        {"document_name": ["Doc 1", "No link"], "document_link": [page_url, None]}
+    )
     result = scraper.download_images_from_dataframe(df, tmp_path, try_pdf=False)
     assert len(result) == 1
     assert result.iloc[0]["image_count"] == 1
@@ -226,7 +228,8 @@ def test_existing_pages_are_not_downloaded_again(scraper_with_pyramid, tmp_path)
 
     again = scraper.download_document_images(page_url, tmp_path, try_pdf=False)
     tiles = [
-        c.args[0] for c in scraper.session.get.call_args_list[requests_before:]
+        c.args[0]
+        for c in scraper.session.get.call_args_list[requests_before:]
         if "_files/" in c.args[0]
     ]
     assert tiles == []
@@ -344,7 +347,9 @@ def test_folio_variants(folio, expected):
     from ticha.core.image_scraper import _folio_variants
 
     url = f"{BASE}/images/dzi/Th687_{folio}.dzi"
-    assert _folio_variants(url) == [f"{BASE}/images/dzi/Th687_{f}.dzi" for f in expected]
+    assert _folio_variants(url) == [
+        f"{BASE}/images/dzi/Th687_{f}.dzi" for f in expected
+    ]
 
 
 def test_failed_pages_are_reported(scraper_with_pyramid, tmp_path):

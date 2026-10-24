@@ -36,24 +36,48 @@ SHARD_BYTES = 300 * 1024 * 1024
 ROW_GROUP_ROWS = 100
 
 ORIGINAL_FEATURES = {
-    "id": "string", "image": "image", "text": "string", "doc_id": "string", "page": "int32",
-    "line": "int32", "language": "string", "source": "string", "year": "string", "town": "string",
-    "doc_type": "string", "document_url": "string",
+    "id": "string",
+    "image": "image",
+    "text": "string",
+    "doc_id": "string",
+    "page": "int32",
+    "line": "int32",
+    "language": "string",
+    "source": "string",
+    "year": "string",
+    "town": "string",
+    "doc_type": "string",
+    "document_url": "string",
 }
 AUGMENTED_FEATURES = {
-    "id": "string", "image": "image", "text": "string", "source_id": "string", "preset": "string",
-    "params": "string", "doc_id": "string", "page": "int32", "line": "int32", "language": "string",
+    "id": "string",
+    "image": "image",
+    "text": "string",
+    "source_id": "string",
+    "preset": "string",
+    "params": "string",
+    "doc_id": "string",
+    "page": "int32",
+    "line": "int32",
+    "language": "string",
 }
 
 
 def hf_features(spec: dict) -> dict:
-    return {name: ({"_type": "Image"} if kind == "image" else {"dtype": kind, "_type": "Value"})
-            for name, kind in spec.items()}
+    return {
+        name: (
+            {"_type": "Image"} if kind == "image" else {"dtype": kind, "_type": "Value"}
+        )
+        for name, kind in spec.items()
+    }
 
 
 def arrow_schema(spec: dict) -> pa.Schema:
-    types = {"string": pa.string(), "int32": pa.int32(),
-             "image": pa.struct([("bytes", pa.binary()), ("path", pa.string())])}
+    types = {
+        "string": pa.string(),
+        "int32": pa.int32(),
+        "image": pa.struct([("bytes", pa.binary()), ("path", pa.string())]),
+    }
     schema = pa.schema([(name, types[kind]) for name, kind in spec.items()])
     meta = {"info": {"features": hf_features(spec)}}
     return schema.with_metadata({"huggingface": json.dumps(meta)})
@@ -82,13 +106,19 @@ def write_shards(rows: pd.DataFrame, spec: dict, folder: Path, split: str) -> li
         columns = {}
         for name in spec:
             if name == "image":
-                columns[name] = [{"bytes": Path(p).read_bytes(), "path": Path(p).name}
-                                 for p in chunk["image_path"]]
+                columns[name] = [
+                    {"bytes": Path(p).read_bytes(), "path": Path(p).name}
+                    for p in chunk["image_path"]
+                ]
             else:
                 columns[name] = chunk[name].tolist()
         path = folder / f"{split}-{k:05d}-of-{len(shards):05d}.parquet"
-        pq.write_table(pa.Table.from_pydict(columns, schema=schema), path,
-                       row_group_size=ROW_GROUP_ROWS, write_page_index=True)
+        pq.write_table(
+            pa.Table.from_pydict(columns, schema=schema),
+            path,
+            row_group_size=ROW_GROUP_ROWS,
+            write_page_index=True,
+        )
         paths.append(path)
     return paths
 
@@ -96,7 +126,10 @@ def write_shards(rows: pd.DataFrame, spec: dict, folder: Path, split: str) -> li
 def original_rows(data: Path, split: str, meta: pd.DataFrame) -> pd.DataFrame:
     lines = pd.read_csv(data / "splits" / split / "lines.csv", keep_default_na=False)
     lines = lines[~lines["doc_id"].isin(EXCLUDED_DOCS)]
-    lines["id"] = [line_id(d, p, n) for d, p, n in zip(lines["doc_id"], lines["page"], lines["line"])]
+    lines["id"] = [
+        line_id(d, p, n)
+        for d, p, n in zip(lines["doc_id"], lines["page"], lines["line"])
+    ]
     lines["image_path"] = lines["image"]
     lines = lines.merge(meta, left_on="doc_id", right_index=True, how="left").fillna("")
     for col in ("page", "line"):
@@ -110,18 +143,29 @@ def augmented_rows(data: Path, name: str, originals: pd.DataFrame) -> pd.DataFra
     by_image = originals.set_index("image")
     rows = []
     for _, aug in index.iterrows():
-        if aug["source"] not in by_image.index:  # copy of a line from an excluded document
+        if (
+            aug["source"] not in by_image.index
+        ):  # copy of a line from an excluded document
             continue
         src = by_image.loc[aug["source"]]
         out = Path(aug["output"])
         params = json.loads(aug["params"])
-        rows.append({
-            "id": f"{src['id']}_{out.stem.rsplit('_', 1)[-1]}", "image_path": str(out),
-            "text": out.with_name(out.stem + ".gt.txt").read_text(encoding="utf-8").strip(),
-            "source_id": src["id"], "preset": params.get("preset", ""), "params": aug["params"],
-            "doc_id": src["doc_id"], "page": int(src["page"]), "line": int(src["line"]),
-            "language": src["language"],
-        })
+        rows.append(
+            {
+                "id": f"{src['id']}_{out.stem.rsplit('_', 1)[-1]}",
+                "image_path": str(out),
+                "text": out.with_name(out.stem + ".gt.txt")
+                .read_text(encoding="utf-8")
+                .strip(),
+                "source_id": src["id"],
+                "preset": params.get("preset", ""),
+                "params": aug["params"],
+                "doc_id": src["doc_id"],
+                "page": int(src["page"]),
+                "line": int(src["line"]),
+                "language": src["language"],
+            }
+        )
     return pd.DataFrame(rows)
 
 
@@ -151,8 +195,11 @@ def write_samples(data: Path, out: Path, originals: pd.DataFrame) -> str:
     rows = ["| Image | Text | Language |", "|---|---|---|"]
     first = None
     for doc_id, page, line, caption in SAMPLES:
-        match = originals[(originals["doc_id"] == doc_id) & (originals["page"] == page)
-                          & (originals["line"] == line)]
+        match = originals[
+            (originals["doc_id"] == doc_id)
+            & (originals["page"] == page)
+            & (originals["line"] == line)
+        ]
         if match.empty:
             continue
         row = match.iloc[0]
@@ -175,18 +222,28 @@ def write_samples(data: Path, out: Path, originals: pd.DataFrame) -> str:
                 _save_sample(out_path, folder / name)
                 shown.append((preset, name))
         if shown:
-            section += ["", f"The same line ({first['id']}) and two of its copies in the `augmented` config:", "",
-                        "| Version | Image |", "|---|---|",
-                        f"| original | ![original](samples/{first['id']}.png) |"]
-            section += [f"| `{preset}` | ![{preset}](samples/{name}) |" for preset, name in shown]
+            section += [
+                "",
+                f"The same line ({first['id']}) and two of its copies in the `augmented` config:",
+                "",
+                "| Version | Image |",
+                "|---|---|",
+                f"| original | ![original](samples/{first['id']}.png) |",
+            ]
+            section += [
+                f"| `{preset}` | ![{preset}](samples/{name}) |"
+                for preset, name in shown
+            ]
     return "\n".join(section) + "\n"
 
 
 def card(counts: dict, repo_id: str, examples: str = "") -> str:
     o, a = counts["original"], counts["augmented"]
     total = sum(o.values())
-    excluded_note = "Removed from test (with their `test_degraded` copies): " + "; ".join(
-        f"`{doc_id}`, {reason}" for doc_id, reason in EXCLUDED_DOCS.items())
+    excluded_note = (
+        "Removed from test (with their `test_degraded` copies): "
+        + "; ".join(f"`{doc_id}`, {reason}" for doc_id, reason in EXCLUDED_DOCS.items())
+    )
     return f"""---
 license: cc-by-nc-sa-4.0
 language:
@@ -363,11 +420,16 @@ use or adapt the code that built it, cite the repository as well.
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     parser.add_argument("--data", type=Path, default=ROOT / "data")
     parser.add_argument("--output", type=Path, default=ROOT / "data" / "hf_dataset")
-    parser.add_argument("--repo-id", default="maclenn77/ticha-htr-lines",
-                        help="Only used in the card's loading example")
+    parser.add_argument(
+        "--repo-id",
+        default="maclenn77/ticha-htr-lines",
+        help="Only used in the card's loading example",
+    )
     args = parser.parse_args()
 
     data, out = args.data.resolve(), args.output.resolve()
@@ -375,9 +437,14 @@ def main() -> None:
     (out / "original").mkdir(parents=True)
     (out / "augmented").mkdir(parents=True)
 
-    texts = pd.read_csv(data / "texts_transcribed.csv", dtype=str, keep_default_na=False)
-    meta = (texts.drop_duplicates("ticha_id").set_index("ticha_id")[["year", "town", "doc_type", "url"]]
-            .rename(columns={"url": "document_url"}))
+    texts = pd.read_csv(
+        data / "texts_transcribed.csv", dtype=str, keep_default_na=False
+    )
+    meta = (
+        texts.drop_duplicates("ticha_id")
+        .set_index("ticha_id")[["year", "town", "doc_type", "url"]]
+        .rename(columns={"url": "document_url"})
+    )
     meta["year"] = meta["year"].str.replace(r"\.0$", "", regex=True)
 
     counts = {"original": {}, "augmented": {}}
@@ -395,7 +462,9 @@ def main() -> None:
         counts["augmented"][name] = len(rows)
         print(f"augmented/{name}: {len(rows)} lines, {len(paths)} shard(s)")
     examples = write_samples(data, out, originals)
-    (out / "README.md").write_text(card(counts, args.repo_id, examples), encoding="utf-8")
+    (out / "README.md").write_text(
+        card(counts, args.repo_id, examples), encoding="utf-8"
+    )
     print(f"Wrote {out}")
 
 

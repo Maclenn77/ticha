@@ -33,8 +33,16 @@ BASE_URL = "https://ticha.haverford.edu"
 INDEX_URL = f"{BASE_URL}/en/texts/"
 WORK_LINK_RE = re.compile(r"/texts/([\w-]+)/0/original/?$")
 VIEWER_INIT_RE = re.compile(r"documentViewerInit\(\s*'([^']+)'\s*,\s*\d+\s*,\s*(\d+)")
-PAGE_COLUMNS = ["slug", "work", "page", "page_label", "url",
-                "transcription", "transcription_regular", "zapotec_marked"]
+PAGE_COLUMNS = [
+    "slug",
+    "work",
+    "page",
+    "page_label",
+    "url",
+    "transcription",
+    "transcription_regular",
+    "zapotec_marked",
+]
 
 
 def html_to_text(html: Optional[str]) -> Dict[str, Optional[str]]:
@@ -48,8 +56,9 @@ def html_to_text(html: Optional[str]) -> Dict[str, Optional[str]]:
     if not html or not html.strip():
         return {"text": None, "marked": None}
     soup = BeautifulSoup(html, "html.parser")
-    for hidden in soup.select("span.content.hide, div.catch, #submitTranscription, "
-                              "form, script, style"):
+    for hidden in soup.select(
+        "span.content.hide, div.catch, #submitTranscription, " "form, script, style"
+    ):
         hidden.decompose()
     marked = [m.get_text(" ", strip=True) for m in soup.select("mark.trigger")]
     for heading in soup.find_all(["h1", "h2", "h3", "h4", "h5", "h6"]):
@@ -64,8 +73,12 @@ def html_to_text(html: Optional[str]) -> Dict[str, Optional[str]]:
 class TichaPrintedScraper:
     """Download the transcriptions of Ticha's printed works, page by page."""
 
-    def __init__(self, rate_limit: float = 2.0, session: Optional[requests.Session] = None,
-                 timeout: float = 30.0):
+    def __init__(
+        self,
+        rate_limit: float = 2.0,
+        session: Optional[requests.Session] = None,
+        timeout: float = 30.0,
+    ):
         self.rate_limit = rate_limit
         self.timeout = timeout
         self.session = session or requests.Session()
@@ -74,7 +87,9 @@ class TichaPrintedScraper:
     def _get(self, url: str) -> Optional[requests.Response]:
         response = self.session.get(url, timeout=self.timeout)
         if response.status_code != 200:
-            logger.error(f"Failed to access {url} (status code: {response.status_code})")
+            logger.error(
+                f"Failed to access {url} (status code: {response.status_code})"
+            )
             return None
         return response
 
@@ -118,8 +133,13 @@ class TichaPrintedScraper:
 
     def scrape_page(self, slug: str, page: int, work: str = "") -> Dict[str, Any]:
         """Text of one page (JSON endpoint, or the page HTML when that is empty)."""
-        row: Dict[str, Any] = {"slug": slug, "work": work or slug, "page": page,
-                               "page_label": None, "url": self._page_url(slug, page)}
+        row: Dict[str, Any] = {
+            "slug": slug,
+            "work": work or slug,
+            "page": page,
+            "page_label": None,
+            "url": self._page_url(slug, page),
+        }
         data: Dict[str, Any] = {}
         response = self._get(f"{BASE_URL}/texts/{slug}/{page}/json")
         if response is not None:
@@ -135,7 +155,9 @@ class TichaPrintedScraper:
             self._delay()
             page_response = self._get(row["url"])
             if page_response is not None:
-                tab = BeautifulSoup(page_response.content, "html.parser").find("div", id="tab1-slug")
+                tab = BeautifulSoup(page_response.content, "html.parser").find(
+                    "div", id="tab1-slug"
+                )
                 if tab is not None:
                     original = html_to_text(str(tab))
 
@@ -144,8 +166,13 @@ class TichaPrintedScraper:
         row["zapotec_marked"] = original["marked"] or regular["marked"]
         return row
 
-    def iter_pages(self, slug: str, work: str = "", skip: Optional[set] = None,
-                   max_pages: Optional[int] = None) -> Iterator[Dict[str, Any]]:
+    def iter_pages(
+        self,
+        slug: str,
+        work: str = "",
+        skip: Optional[set] = None,
+        max_pages: Optional[int] = None,
+    ) -> Iterator[Dict[str, Any]]:
         """Yield every page of a work, skipping page numbers in ``skip``."""
         last = self.last_page(slug)
         pages = [p for p in range(last + 1) if p not in (skip or set())]
@@ -159,33 +186,48 @@ class TichaPrintedScraper:
             except requests.RequestException as e:
                 logger.error(f"Error on {slug} page {page}: {e}")
 
-    def scrape(self, output: Path, works: Optional[List[str]] = None,
-               max_pages: Optional[int] = None, save_every: int = 20) -> pd.DataFrame:
+    def scrape(
+        self,
+        output: Path,
+        works: Optional[List[str]] = None,
+        max_pages: Optional[int] = None,
+        save_every: int = 20,
+    ) -> pd.DataFrame:
         """
         Download the selected works (all by default) into one CSV, one row per page.
 
         Pages already in ``output`` are skipped, so an interrupted run resumes.
         """
         output = Path(output)
-        done = pd.read_csv(output) if output.exists() else pd.DataFrame(columns=PAGE_COLUMNS)
+        done = (
+            pd.read_csv(output)
+            if output.exists()
+            else pd.DataFrame(columns=PAGE_COLUMNS)
+        )
         rows = done.to_dict("records")
         catalogue = self.list_works()
         if works:
             unknown = set(works) - set(catalogue["slug"])
             if unknown:
-                raise ValueError(f"Unknown works: {sorted(unknown)}; "
-                                 f"available: {catalogue['slug'].tolist()}")
+                raise ValueError(
+                    f"Unknown works: {sorted(unknown)}; "
+                    f"available: {catalogue['slug'].tolist()}"
+                )
             catalogue = catalogue[catalogue["slug"].isin(works)]
 
         def save():
-            frame = pd.DataFrame(rows, columns=PAGE_COLUMNS).sort_values(["slug", "page"])
+            frame = pd.DataFrame(rows, columns=PAGE_COLUMNS).sort_values(
+                ["slug", "page"]
+            )
             output.parent.mkdir(parents=True, exist_ok=True)
             frame.to_csv(output, index=False)
             return frame
 
         for work in catalogue.itertuples():
             skip = set(done.loc[done["slug"] == work.slug, "page"].astype(int))
-            for i, row in enumerate(self.iter_pages(work.slug, work.title, skip, max_pages), 1):
+            for i, row in enumerate(
+                self.iter_pages(work.slug, work.title, skip, max_pages), 1
+            ):
                 rows.append(row)
                 if i % save_every == 0:
                     save()
@@ -197,8 +239,9 @@ class TichaPrintedScraper:
         self.session.close()
 
 
-def write_corpus(pages: pd.DataFrame, output_dir: Path,
-                 column: str = "transcription") -> List[Path]:
+def write_corpus(
+    pages: pd.DataFrame, output_dir: Path, column: str = "transcription"
+) -> List[Path]:
     """Join each work's pages, in order, into ``<output_dir>/<slug>.txt``."""
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
