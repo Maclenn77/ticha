@@ -55,6 +55,11 @@ lines = [
     "rapidfuzz>=3.0",
     "huggingface_hub>=0.20,<2",  # fine-tuned alignment model; 2.x needs click>=8.4, kraken 7.1 needs <8.3
 ]
+htr = [
+    # ticha.core.htr: the fine-tuned TrOCR models (maclenn77/ticha-trocr-base)
+    "torch>=2.0",
+    "transformers>=4.46,<5",
+]
 dev = [
     "pytest>=7.0.0",
     "pytest-mock>=3.10.0",
