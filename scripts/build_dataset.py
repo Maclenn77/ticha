@@ -39,7 +39,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from ticha.core.augmentation import Augmenter, DatasetAugmenter  # noqa: E402
 from ticha.core.line_pairing import crop_line  # noqa: E402
 
-from dataset_exclusions import EXCLUDED_DOCS  # noqa: E402
+from dataset_exclusions import DATASET_VERSION, EXCLUDED_DOCS  # noqa: E402
 
 SPLIT_RATIOS = {"train": 0.8, "validation": 0.1, "test": 0.1}
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".tif", ".tiff"}
@@ -315,6 +315,8 @@ def main() -> None:
         "lines": {s: int(metrics.loc[s, "lines"]) for s in SPLIT_RATIOS},
         "documents": {s: int(metrics.loc[s, "documents"]) for s in SPLIT_RATIOS},
         "augmented lines": aug_counts,
+        "dataset version": DATASET_VERSION,
+        "excluded documents": {doc_id: EXCLUDED_DOCS[doc_id] for doc_id in excluded},
         "config": {k: (str(v) if isinstance(v, Path) else v) for k, v in vars(args).items()},
     }
     (reports / "final_metrics.json").write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")

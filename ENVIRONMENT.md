@@ -122,7 +122,7 @@ To remove it: `conda env remove -n ticha` and `jupyter kernelspec remove ticha`.
 
 ## TrOCR fine-tuning on a GPU VM
 
-[`notebooks/ticha_trocr_finetuning.ipynb`](notebooks/ticha_trocr_finetuning.ipynb)
+[`notebooks/train/ticha_trocr_finetuning.ipynb`](notebooks/train/ticha_trocr_finetuning.ipynb)
 fine-tunes `microsoft/trocr-base-handwritten` on the
 [`maclenn77/ticha-htr-lines`](https://huggingface.co/datasets/maclenn77/ticha-htr-lines)
 dataset from the Hub, so it doesn't need `data/` or the conda environment. It
