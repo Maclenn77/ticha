@@ -1,7 +1,6 @@
 name: ticha
 channels:
   - conda-forge
-  - defaults
 dependencies:
   - _openmp_mutex=4.5
   - _python_abi3_support=1.0

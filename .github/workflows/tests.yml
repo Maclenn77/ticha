@@ -1,0 +1,82 @@
+name: Tests
+
+on:
+  push:
+    branches: [main, development]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # The versions pinned in the dev extra of pyproject.toml
+      - run: pip install black==24.8.0 ruff==0.6.9
+      - run: ruff check src scripts tests
+      - run: black --check src scripts tests
+
+  tests:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install
+        # CPU-only PyTorch: the default Linux wheel brings ~3 GB of CUDA libraries.
+        # rapidfuzz comes from the lines extra; kraken itself is not needed by the tests.
+        run: |
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -e ".[htr,dev]" rapidfuzz
+      - name: Check that the HTR tests can run
+        # Without torch and transformers they are skipped, not failed
+        run: python -c "import torch, transformers; print(torch.__version__, transformers.__version__)"
+      - run: pytest -q -rs
+      - run: ticha --help
+
+  environment:
+    # Builds the conda environment from scratch, as a new user would. Slow (PyTorch
+    # and kraken), so it runs on pull requests to main and on demand.
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.base_ref == 'main')
+    name: environment (${{ matrix.os }}, ${{ matrix.file }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            file: environment.yml
+          - os: macos-14
+            file: environment.yml
+          - os: macos-14  # Apple Silicon, the platform of the lock file
+            file: environment.osx-arm64.lock.yml
+    defaults:
+      run:
+        shell: bash -el {0}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: conda-incubator/setup-miniconda@v3
+        with:
+          environment-file: ${{ matrix.file }}
+          activate-environment: ticha
+          miniforge-version: latest
+          conda-remove-defaults: "true"
+      - name: Imports
+        # numpy and torch together: conda's OpenMP runtime would clash with PyTorch's
+        run: python -c "import numpy, torch, kraken, transformers, datasets, matplotlib, pyarrow; from kraken.lib import vgsl; print('ok')"
+      - run: pip check
+      - run: python -m pytest -q -rs

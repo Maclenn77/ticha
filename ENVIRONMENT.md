@@ -130,6 +130,14 @@ Everything the notebook downloads or produces goes to `data/` in the repo
 TICHA_DATA=/Volumes/disk/ticha-data jupyter lab notebooks/ticha_data_preparation_pipeline.ipynb
 ```
 
+## Continuous integration
+
+The [`Tests`](.github/workflows/tests.yml) workflow checks formatting (ruff,
+black) and runs the tests on Python 3.10-3.12 on every push and pull request.
+On pull requests to `main` (or when started by hand) it also builds this
+environment from scratch, from `environment.yml` on Linux and macOS and from
+the lock file on Apple Silicon, and runs the tests inside it.
+
 ## Updating the environment
 
 After changing `environment.yml`:
@@ -137,7 +145,7 @@ After changing `environment.yml`:
 ```bash
 conda env update -n ticha -f environment.yml --prune
 python -m pytest -q
-conda env export -n ticha --no-builds | grep -v '^prefix:' > environment.osx-arm64.lock.yml   # on macOS arm64
+conda env export -n ticha --no-builds | grep -v -e '^prefix:' -e '^  - defaults$' > environment.osx-arm64.lock.yml   # on macOS arm64
 ```
 
 To remove it: `conda env remove -n ticha` and `jupyter kernelspec remove ticha`.
