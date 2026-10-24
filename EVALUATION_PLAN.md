@@ -27,7 +27,7 @@ All are trained and on the VM, under `~/ticha-runs/`.
 | | CTC + cloze `zap` / `zap_spa` | `trocr-modified/cloze_*` |
 | Decoupled, augmentation + regularization | CTC encoder (and the head variants in `encoder_ctc_runs/`, if kept as final) | `trocr-modified-aug-reg/` |
 | | Bridges `zap` / `zap_spa`, CTC + cloze `zap` / `zap_spa` | `trocr-modified-aug-reg/` |
-| Language-model fusion | Best end-to-end model + Zapotec LM, rescoring and shallow fusion | `notebooks/ticha_trocr_lm_fusion.ipynb`, LMs in `trocr-modified/decoder_*` and `lm-manuscript/` |
+| Language-model fusion | Best end-to-end model + Zapotec LM, rescoring and shallow fusion | `notebooks/train/not_in_report/ticha_trocr_lm_fusion.ipynb` (local only), LMs in `trocr-modified/decoder_*` and `lm-manuscript/` |
 
 The **decoupled bridges were selected with the old decoding**. Their saved weights are kept as they are. The evaluation decodes them with start token `0`, and that is the number reported.
 

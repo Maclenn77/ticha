@@ -324,8 +324,7 @@ editorial notes.
   every step from downloading to the final train/validation/test dataset with
   augmentation, using the code in `src/` directly.
 - [`notebooks/train/`](notebooks/train): TrOCR fine-tuning, the right-to-left
-  reranker, an ablation and a usage example. Experiments left out of the
-  report are in `notebooks/train/no_reported/`.
+  reranker, an ablation and a usage example.
 - [`notebooks/reports/`](notebooks/reports): evaluation of the models and the
   metrics in the report.
 
