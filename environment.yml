@@ -1,0 +1,54 @@
+# Conda environment for everything that runs locally: the dataset pipeline
+# (notebooks/ticha_data_preparation_pipeline.ipynb), the scripts, the tests, the
+# usage example and the report notebooks. Training runs on a GPU machine with
+# requirements-trocr.txt instead. The notebooks import the code from src/
+# directly, so the ticha package is not installed.
+#
+#   conda env create -f environment.yml
+#   conda activate ticha
+#   python -m ipykernel install --user --name ticha --display-name "Python (ticha)"
+#
+# Conda provides only Python and Jupyter; every other package comes from pip.
+# PyTorch (a kraken dependency) only comes from pip, and conda's numpy links an
+# OpenMP runtime that clashes with the one bundled in PyTorch's wheel
+# ("OMP: Error #15" on import torch), so the numeric stack comes from pip too.
+# Don't `conda install` packages into this environment; use pip.
+#
+# See ENVIRONMENT.md for details.
+name: ticha
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12
+  - pip
+  # notebook
+  - jupyterlab
+  - ipykernel
+  - pip:
+      # scraping
+      - pandas>=1.5,<3
+      - requests>=2.28
+      - beautifulsoup4>=4.15
+      - selenium>=4.0          # manuscript list only; needs Google Chrome installed
+      # images / augmentation
+      - pillow>=10.1
+      - numpy
+      # dataset export (Parquet) and report figures
+      - pyarrow
+      - matplotlib
+      # line pairing: kraken (segmentation + HTR) pulls PyTorch from PyPI, which
+      # has the Apple Silicon (MPS) and CUDA builds
+      - rapidfuzz>=3.0
+      - kraken==7.1.1
+      # TrOCR models and the dataset from the Hugging Face Hub (usage example,
+      # report notebooks); the same transformers version as the GPU VM
+      - transformers==4.46.3
+      - datasets>=2.19,<4      # the range of requirements-trocr.txt, used to train the models
+      - jiwer>=3.0
+      # Pinned because each newer version breaks another package: transformers
+      # 4.46 needs huggingface_hub < 1, and kraken 7.1.1 needs click < 8.3.
+      - huggingface_hub>=0.20,<1
+      - click>=8.1,<8.3
+      # tests
+      - pytest>=7.0
+      - pytest-mock>=3.10

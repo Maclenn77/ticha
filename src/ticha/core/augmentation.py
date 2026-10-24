@@ -576,7 +576,7 @@ def load_targets(directory: Any) -> List[ImageProfile]:
 
 
 class DatasetAugmenter:
-    """Augment the output of ``ticha-scraper lines``."""
+    """Augment the output of ``ticha lines``."""
 
     def __init__(
         self,

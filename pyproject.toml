@@ -3,7 +3,7 @@ requires = ["setuptools>=77.0.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [tool.bumpver]
-current_version = "0.2.0"
+current_version = "1.0.0"
 version_pattern = "MAJOR.MINOR.PATCH"
 commit_message = "bump version {old_version} -> {new_version}"
 commit = true
@@ -21,44 +21,54 @@ push = false
 
 [project]
 name = "ticha"
-version = "0.2.0"
-description = "Web scraper for Ticha Colonial Zapotec manuscript data"
+version = "1.0.0"
+description = "Colonial Zapotec manuscripts from Ticha: scraping, a line-level HTR dataset, and TrOCR handwriting recognition"
 readme = "README.md"
 license = "MIT"
 authors = [
     {name = "J. P. Péreztejada", email = "maclenn77@gmail.com"},
 ]
-keywords = ["zapotec", "manuscripts", "web scraping", "pandas", "digital humanities"]
+keywords = ["zapotec", "manuscripts", "digital humanities", "web scraping", "htr", "ocr", "trocr", "kraken", "low-resource languages"]
 classifiers = [
     "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Science/Research",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
     "Topic :: Internet :: WWW/HTTP :: Browsers",
     "Topic :: Scientific/Engineering :: Information Analysis",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Scientific/Engineering :: Image Recognition",
+    "Topic :: Text Processing :: Linguistic",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
 ]
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 dependencies = [
     "pandas>=1.5.0,<3.0.0",
     "selenium>=4.0.0",
     "requests>=2.28.0",
-    "beautifulsoup4>=4.11.0",
-    "Pillow>=9.0.0",
+    "beautifulsoup4>=4.15.0",
+    "Pillow>=10.1.0",  # ImageFont.load_default(size=...) in ticha check
 ]
 
 [project.optional-dependencies]
 lines = [
-    "kraken>=5.0",
+    "kraken>=6.0,<8",
     "rapidfuzz>=3.0",
+    "huggingface_hub>=0.20,<2",  # fine-tuned alignment model; 2.x needs click>=8.4, kraken 7.1 needs <8.3
+]
+htr = [
+    # ticha.core.htr: the fine-tuned TrOCR models (maclenn77/ticha-trocr-base)
+    "torch>=2.0",
+    "transformers>=4.46,<5",
 ]
 dev = [
     "pytest>=7.0.0",
     "pytest-mock>=3.10.0",
-    "black>=23.0.0",
-    "ruff>=0.1.0",
+    "black==24.8.0",  # pinned: other versions format differently
+    "ruff==0.6.9",
     "mypy>=1.0.0",
 ]
 
@@ -68,16 +78,25 @@ Repository = "https://github.com/maclenn77/ticha.git"
 Issues = "https://github.com/maclenn77/ticha/issues"
 
 [project.scripts]
-ticha-scraper = "ticha.cli:main"
+ticha = "ticha.cli:main"
+ticha-scraper = "ticha.cli:deprecated_main"  # old name, removed in 2.0
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+
 [tool.black]
 line-length = 88
-target-version = ['py39']
+target-version = ['py310']
 
 [tool.ruff]
-select = ["E", "F", "B", "SIM", "I"]
 line-length = 88
-target-version = "py39"
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "B", "SIM", "I"]
+# black sets the line length; the lines it leaves long are strings, comments and
+# docstrings (some are the dataset card text), so E501 would only repeat it
+ignore = ["E501"]

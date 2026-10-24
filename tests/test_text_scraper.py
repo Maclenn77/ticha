@@ -39,7 +39,9 @@ METADATA_HTML = """
 """
 
 # /en/texts/<id>/ layout: transcription as raw text + <br/>
-HANDWRITTEN_HTML = METADATA_HTML + """
+HANDWRITTEN_HTML = (
+    METADATA_HTML
+    + """
 <div role="tabpanel" class="tab-pane" id="transcription">
 
   (8r) <br/>
@@ -55,6 +57,7 @@ HANDWRITTEN_HTML = METADATA_HTML + """
   available.</p>
 </div>
 """
+)
 
 # /en/text/<id>/<n>/ layout: one page per URL, pageMap lists the pages
 FEATURED_PAGE_HTML = """
@@ -219,10 +222,12 @@ def test_scrape_documents_from_dataframe():
         f"{BASE}/en/texts/A2/": HANDWRITTEN_HTML,
     }
     scraper = TichaTextScraper(rate_limit=0, session=fake_session(pages))
-    df = pd.DataFrame({
-        "document_name": ["Doc 1", "Doc 2", "No link"],
-        "document_link": ["/en/texts/A1/", "/en/texts/A2/", None],
-    })
+    df = pd.DataFrame(
+        {
+            "document_name": ["Doc 1", "Doc 2", "No link"],
+            "document_link": ["/en/texts/A1/", "/en/texts/A2/", None],
+        }
+    )
     result_df = scraper.scrape_documents_from_dataframe(df)
     assert len(result_df) == 2
     assert "document_name" in result_df.columns  # Original columns preserved
@@ -235,3 +240,25 @@ def test_close():
     session.headers = {}
     TichaTextScraper(session=session).close()
     session.close.assert_called_once()
+
+
+def test_text_with_br_after_bare_br():
+    # html.parser in bs4 < 4.15 parses the <br/> after a bare <br> as a
+    # container holding the rest of the text
+    soup = BeautifulSoup(
+        "<br><div id='t'>(8r) <br/>Yo Pedro<br/>oy Jueves<br/></div>", "html.parser"
+    )
+    assert element_to_text(soup.find(id="t")) == "(8r)\nYo Pedro\noy Jueves"
+
+
+def test_strip_office_markup_keeps_the_transcription():
+    from ticha.core.text_scraper import strip_office_markup
+
+    text = (
+        "[if gte mso 9]><xml><br/> <w:WordDocument></w:WordDocument></xml><![endif]\n"
+        "<br/> <br/>\nStartFragment\nAnachii Domigo 26\n"
+        "[if !supportLineBreakNewLine]\n\n[endif]\npeo Jolio\nEndFragment"
+    )
+    assert strip_office_markup(text) == "Anachii Domigo 26\n\npeo Jolio"
+    assert strip_office_markup("q[ue] (?) <sic>") == "q[ue] (?) <sic>"
+    assert strip_office_markup(None) is None

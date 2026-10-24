@@ -15,6 +15,7 @@ import random
 import re
 import time
 import xml.etree.ElementTree as ET
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
@@ -196,10 +197,24 @@ def _expand_page_range(pages: str) -> List[str]:
     return [str(n) for n in range(to_int(first), to_int(last) + 1)]
 
 
-def _zero_stripped(dzi_url: str) -> Optional[str]:
-    """``.../Oc111_09r.dzi`` -> ``.../Oc111_9r.dzi`` (None if unchanged)."""
-    alt = re.sub(r"_0+(\d+[rv]?\.dzi)$", r"_\1", dzi_url)
-    return alt if alt != dzi_url else None
+def _folio_variants(dzi_url: str) -> List[str]:
+    """
+    Other spellings of the folio in a DZI URL, tried when it is not found.
+
+    Ticha's file names are inconsistently zero-padded: ``data-pages="9r-9v"``
+    may be stored as ``Th687_09r.dzi`` and ``09r`` as ``Oc111_9r.dzi``.
+    ``.../Oc111_09r.dzi`` -> ``[.../Oc111_9r.dzi, .../Oc111_009r.dzi]``.
+    """
+    match = re.search(r"_(\d+)([rv]?\.dzi)$", dzi_url)
+    if not match:
+        return []
+    digits = match.group(1).lstrip("0") or "0"
+    variants = []
+    for folio in (digits, digits.zfill(2), digits.zfill(3)):
+        alt = f"{dzi_url[: match.start()]}_{folio}{match.group(2)}"
+        if alt != dzi_url and alt not in variants:
+            variants.append(alt)
+    return variants
 
 
 def ticha_id_from_url(url: str) -> Optional[str]:
@@ -227,6 +242,7 @@ class TichaImageScraper:
         session: Optional[requests.Session] = None,
         timeout: float = 30.0,
         retries: int = 3,
+        tile_workers: int = 4,
     ):
         """
         Initialize the image scraper.
@@ -237,11 +253,14 @@ class TichaImageScraper:
             session: Optional requests session (useful for testing)
             timeout: Request timeout in seconds
             retries: Attempts per request before giving up
+            tile_workers: Tiles downloaded at the same time (OpenSeadragon,
+                Ticha's own viewer, also loads several tiles in parallel)
         """
         self.rate_limit = rate_limit
         self.tile_delay = tile_delay
         self.timeout = timeout
         self.retries = retries
+        self.tile_workers = max(1, tile_workers)
         self.base_url = "https://ticha.haverford.edu"
         self.session = session or requests.Session()
         self.session.headers.setdefault("User-Agent", USER_AGENT)
@@ -382,11 +401,15 @@ class TichaImageScraper:
         try:
             return parse_dzi(self._get(source).content, source)
         except requests.HTTPError as e:
-            alt = _zero_stripped(source)
-            status = getattr(e.response, "status_code", None)
-            if alt and status == 404:
+            if getattr(e.response, "status_code", None) != 404:
+                raise
+            for alt in _folio_variants(source):
                 logger.debug(f"{source} not found, trying {alt}")
-                return parse_dzi(self._get(alt).content, alt)
+                try:
+                    return parse_dzi(self._get(alt).content, alt)
+                except requests.HTTPError as alt_error:
+                    if getattr(alt_error.response, "status_code", None) != 404:
+                        raise
             raise
 
     # ------------------------------------------------------------------ #
@@ -409,21 +432,27 @@ class TichaImageScraper:
             f"Stitching {cols}x{rows} tiles at level {level} ({width}x{height}px)"
         )
 
+        def fetch(position: tuple) -> Image.Image:
+            col, row = position
+            tile = Image.open(
+                BytesIO(self._get(info.tile_url(level, col, row)).content)
+            )
+            tile.load()
+            if self.tile_delay:
+                time.sleep(self.tile_delay)
+            return tile if tile.mode == "RGB" else tile.convert("RGB")
+
+        positions = [(col, row) for row in range(rows) for col in range(cols)]
         canvas = Image.new("RGB", (width, height), "white")
-        for row in range(rows):
-            for col in range(cols):
-                url = info.tile_url(level, col, row)
-                tile = Image.open(BytesIO(self._get(url).content))
-                tile.load()
-                if tile.mode != "RGB":
-                    tile = tile.convert("RGB")
+        with ThreadPoolExecutor(max_workers=self.tile_workers) as pool:
+            for (col, row), tile in zip(
+                positions, pool.map(fetch, positions), strict=True
+            ):
                 # Tiles beyond the first row/column carry `overlap` extra
                 # pixels on their left/top edge.
                 x = col * info.tile_size - (info.overlap if col else 0)
                 y = row * info.tile_size - (info.overlap if row else 0)
                 canvas.paste(tile, (x, y))
-                if self.tile_delay:
-                    time.sleep(self.tile_delay)
         return canvas
 
     def download_dzi(
@@ -444,11 +473,20 @@ class TichaImageScraper:
         image = self.stitch_dzi(info, level)
         output_path = Path(output_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        save_kwargs = {"quality": 95} if output_path.suffix.lower() in (
-            ".jpg",
-            ".jpeg",
-        ) else {}
-        image.save(output_path, **save_kwargs)
+        save_kwargs = (
+            {"quality": 95}
+            if output_path.suffix.lower()
+            in (
+                ".jpg",
+                ".jpeg",
+            )
+            else {}
+        )
+        # Write to a temporary file first: an interrupted save never leaves a
+        # truncated image that a later run would skip as already downloaded.
+        partial = output_path.with_name(f"{output_path.stem}.part{output_path.suffix}")
+        image.save(partial, **save_kwargs)
+        partial.replace(output_path)
         logger.info(f"Saved {output_path}")
         return output_path
 
@@ -483,6 +521,7 @@ class TichaImageScraper:
         max_dimension: Optional[int] = None,
         make_pdf: bool = False,
         try_pdf: bool = True,
+        skip_existing: bool = True,
     ) -> Dict[str, Any]:
         """
         Download every page image of a document.
@@ -494,9 +533,13 @@ class TichaImageScraper:
             max_dimension: Limit the largest side of each image (None = full res)
             make_pdf: Also bundle the downloaded pages into a PDF
             try_pdf: Try the original PDF link first
+            skip_existing: Keep page images already on disk instead of
+                downloading them again
 
         Returns:
-            Dictionary with url, image_paths, pdf_path and error (if any)
+            Dictionary with url, image_paths, image_folios, missing_folios
+            (pages that could not be downloaded), pdf_path and error (set
+            when no page image could be downloaded)
         """
         if not document_url.startswith("http"):
             document_url = urljoin(self.base_url, document_url)
@@ -504,18 +547,22 @@ class TichaImageScraper:
             "url": document_url,
             "image_paths": [],
             "image_folios": [],
+            "missing_folios": [],
             "pdf_path": None,
             "error": None,
         }
         try:
             html = self._get(document_url).content
             output_dir = Path(output_dir)
-            stem = re.sub(
-                r"[^\w\-]+",
-                "_",
-                ticha_id_from_url(document_url)
-                or document_url.rstrip("/").split("/")[-1],
-            ) or "document"
+            stem = (
+                re.sub(
+                    r"[^\w\-]+",
+                    "_",
+                    ticha_id_from_url(document_url)
+                    or document_url.rstrip("/").split("/")[-1],
+                )
+                or "document"
+            )
 
             if try_pdf:
                 for pdf_url in self.find_pdf_links(html, document_url):
@@ -539,11 +586,19 @@ class TichaImageScraper:
             for page, source in enumerate(sources, 1):
                 path = output_dir / stem / f"page_{page:03d}.{image_format}"
                 try:
-                    self.download_dzi(source, path, max_dimension=max_dimension)
+                    if skip_existing and path.exists():
+                        logger.info(f"Already downloaded: {path}")
+                    else:
+                        self.download_dzi(source, path, max_dimension=max_dimension)
                     result["image_paths"].append(str(path))
                     result["image_folios"].append(folio_from_source(source, stem))
                 except Exception as e:
                     logger.error(f"Failed page {page} of {document_url}: {e}")
+                    result["missing_folios"].append(folio_from_source(source, stem))
+            if result["missing_folios"] and not result["image_paths"]:
+                result["error"] = f"All {len(sources)} pages failed: " + ";".join(
+                    result["missing_folios"]
+                )
 
             if make_pdf and result["image_paths"] and not result["pdf_path"]:
                 pdf = self.images_to_pdf(
@@ -581,5 +636,6 @@ class TichaImageScraper:
             result["image_count"] = len(result["image_paths"])
             result["image_paths"] = ";".join(result["image_paths"])
             result["image_folios"] = ";".join(result["image_folios"])
+            result["missing_folios"] = ";".join(result["missing_folios"])
             rows.append({**row.to_dict(), **result})
         return pd.DataFrame(rows)

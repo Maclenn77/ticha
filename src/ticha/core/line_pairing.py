@@ -1,7 +1,7 @@
 """Pair segmented manuscript lines with their Ticha transcriptions.
 
-Input: the CSVs written by ``ticha-scraper texts`` (transcriptions) and
-``ticha-scraper images`` (page images). Pipeline per document:
+Input: the CSVs written by ``ticha texts`` (transcriptions) and
+``ticha images`` (page images). Pipeline per document:
 
 1. Clean: keep documents with a transcription (and, optionally, a given
    transcription status).
@@ -11,50 +11,60 @@ Input: the CSVs written by ``ticha-scraper texts`` (transcriptions) and
    columns row by row, two-page spreads left page first).
 3. Recognize each line with a generic HTR model (McCATMuS by default). The
    rough reading is only used to find which transcription line goes where.
-4. Align segmented lines and transcription lines with dynamic programming:
-   lines may stay without text (stamped-paper headers, untranscribed
-   signatures) and transcription lines may stay without a line. Each pair
-   gets a confidence from the character error rate (CER) between reading and
-   transcription. Pages are aligned on their own when the transcription's
-   folio markers match the image folios, otherwise the whole document is
-   aligned at once. Without a recognizer, lines are paired in order and a
-   page is accepted only when the line counts agree.
+4. Align the line readings with the transcription as a stream of words
+   (``align_words``): each line gets the span of words it reads, so
+   transcriptions whose line breaks do not follow the manuscript are cut
+   again; lines may stay without text and words without a line. A pair is
+   confident when its text fits better than the neighbouring texts and its
+   CER is low enough (see ``LinePairer``). Pages are aligned on their own
+   when the transcription's folio markers match the image folios, otherwise
+   the whole document is aligned at once. Without a recognizer, lines are
+   paired in order and a page is accepted only when the line counts agree.
 
 Output (``output_dir``):
 
-- ``auto/``: pages where every transcription line was paired confidently,
-  as PAGE XML (2019 schema; ``TextEquiv/@conf`` holds the confidence) next
-  to a copy of the image. Readable by eScriptorium, Transkribus and
-  ``ketos train -f page``.
+- ``auto/``: pages paired confidently up to ``review_tolerance`` (doubtful
+  lines are written without text), as PAGE XML (2019 schema;
+  ``TextEquiv/@conf`` holds the confidence) next to a copy of the image.
+  Readable by eScriptorium, Transkribus and ``ketos train -f page``.
 - ``review/``: every other page, pre-filled with the best alignment, plus a
   ``.txt`` with the transcription lines assigned to it. Nothing is
   discarded: import both into eScriptorium to correct them.
+- ``untranscribed/``: pages to which no transcription was assigned.
 - ``lines/`` (optional): crops + ``.gt.txt`` of confidently paired lines.
 - ``manifest.csv`` (one row per page) and ``lines.csv`` (one row per line).
 """
 
+import bisect
 import hashlib
 import json
 import logging
+import multiprocessing
 import os
 import re
 import shutil
 import statistics
 import unicodedata
 import xml.etree.ElementTree as ET
-from dataclasses import dataclass, field
+from concurrent.futures import ProcessPoolExecutor
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
+from itertools import pairwise
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
 import pandas as pd
 from PIL import Image, ImageDraw
 
+from .text_scraper import strip_office_markup
+
 logger = logging.getLogger(__name__)
 
 PAGE_NS = "http://schema.primaresearch.org/PAGE/gts/pagecontent/2019-07-15"
 
 DEFAULT_STATUSES = ("Completed and Checked", "Completed but not Checked")
+# Output folders of a page
+PAGE_STATUSES = ("auto", "review", "untranscribed")
 # McCATMuS: generic HTR model for 16th-21st c. manuscripts (es, fr, la, ...)
 DEFAULT_MODEL = "10.5281/zenodo.13788177"
 
@@ -62,6 +72,8 @@ DEFAULT_MODEL = "10.5281/zenodo.13788177"
 FOLIO_MARKER_RE = re.compile(r"^\s*[\(\[]\s*(\d{1,4}\s*[rv]?)\s*[\)\]]\s*", re.I)
 # Runs of spaces Ticha uses to lay out columns (signatures, witness lists)
 COLUMN_GAP_RE = re.compile(r" {4,}")
+# Marks of a word broken at the end of a line
+HYPHENS = {"-", "=", "¬", "⸗"}
 
 # A segmenter takes an image path and returns
 # {"lines": [{"baseline": [[x, y], ...], "boundary": [[x, y], ...],
@@ -101,10 +113,18 @@ def split_transcription_pages(text: str) -> List[Tuple[Optional[str], str]]:
     return result
 
 
+# Line references some transcriptions start lines with: "63r-5 Joseph de ..."
+LINE_REFERENCE_RE = re.compile(r"^\s*\d{1,4}[rv]-\d{1,3}\s+")
+
+
 def transcription_lines(page_text: str, split_columns: bool = True) -> List[str]:
-    """Non-empty lines of a page; column layouts split into separate lines."""
+    """
+    Non-empty lines of a page; column layouts split into separate lines and
+    line references (``63r-5``) removed.
+    """
     lines = []
     for line in page_text.splitlines():
+        line = LINE_REFERENCE_RE.sub("", line)
         parts = COLUMN_GAP_RE.split(line) if split_columns else [line]
         lines.extend(p.strip() for p in parts if p.strip())
     return lines
@@ -118,6 +138,15 @@ def normalize_folio(folio: Optional[str]) -> Optional[str]:
     return re.sub(r"^0+(?=\d)", "", folio)
 
 
+_EDITORIAL_RE = re.compile(r"\[[^\]]*\]|\([^)]*\)")
+
+
+def _normalize_kept(text: str) -> str:
+    text = unicodedata.normalize("NFD", text.lower())
+    text = "".join(c for c in text if c.isalnum() and not unicodedata.combining(c))
+    return text.translate(str.maketrans("vjy", "uii"))
+
+
 def normalize_for_matching(text: str) -> str:
     """
     Reduce a line to what a generic HTR model and Ticha agree on.
@@ -126,21 +155,14 @@ def normalize_for_matching(text: str) -> str:
     case, punctuation and spaces (word separation in the manuscripts is
     irregular), and merges letters used interchangeably (u/v, i/j/y).
     """
-    text = re.sub(r"\[[^\]]*\]|\([^)]*\)", "", text)
-    text = unicodedata.normalize("NFD", text.lower())
-    text = "".join(c for c in text if c.isalnum() and not unicodedata.combining(c))
-    return text.translate(str.maketrans("vjy", "uii"))
+    return _normalize_kept(_EDITORIAL_RE.sub("", text))
 
 
-def cer(reading: str, reference: str) -> float:
-    """Character error rate of a reading against a reference, after normalizing."""
-    a, b = normalize_for_matching(reading), normalize_for_matching(reference)
-    if not b:
-        return 0.0 if not a else 1.0
+def _distance(a: str, b: str) -> int:
     try:
         from rapidfuzz.distance import Levenshtein
 
-        distance = Levenshtein.distance(a, b)
+        return Levenshtein.distance(a, b)
     except ImportError:  # pragma: no cover - small fallback
         prev = list(range(len(b) + 1))
         for i, ca in enumerate(a, 1):
@@ -148,8 +170,15 @@ def cer(reading: str, reference: str) -> float:
             for j, cb in enumerate(b, 1):
                 cur.append(min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (ca != cb)))
             prev = cur
-        distance = prev[-1]
-    return distance / len(b)
+        return prev[-1]
+
+
+def cer(reading: str, reference: str) -> float:
+    """Character error rate of a reading against a reference, after normalizing."""
+    a, b = normalize_for_matching(reading), normalize_for_matching(reference)
+    if not b:
+        return 0.0 if not a else 1.0
+    return _distance(a, b) / len(b)
 
 
 # ---------------------------------------------------------------------- #
@@ -166,6 +195,7 @@ class Line:
     fragment: bool = False
     reading: Optional[str] = None
     cer: Optional[float] = None
+    margin: Optional[float] = None  # CER against neighbouring texts minus own CER
     confident: bool = False
 
     @property
@@ -197,7 +227,7 @@ def _mark_fragments(
         (ln for ln in lines if ln.width >= fragment_ratio * reference),
         key=lambda ln: ln.y,
     )
-    gaps = [b.y - a.y for a, b in zip(full, full[1:]) if b.y - a.y > 1]
+    gaps = [b.y - a.y for a, b in pairwise(full) if b.y - a.y > 1]
     spacing = statistics.median(gaps) if gaps else float("inf")
     for line in lines:
         if line.width < tiny_ratio * reference:
@@ -212,7 +242,7 @@ def _mark_fragments(
 def _band_order(lines: List[Line]) -> List[Line]:
     """Top to bottom; lines side by side at the same height left to right."""
     main = sorted((ln for ln in lines if not ln.fragment), key=lambda ln: ln.y)
-    gaps = [b.y - a.y for a, b in zip(main, main[1:]) if b.y - a.y > 1]
+    gaps = [b.y - a.y for a, b in pairwise(main) if b.y - a.y > 1]
     tolerance = 0.5 * statistics.median(gaps) if gaps else 0
 
     bands: List[List[Line]] = []
@@ -330,6 +360,279 @@ def align(
     return path[::-1]
 
 
+@dataclass
+class Word:
+    """A transcription word: ``texts[line][start:end]`` and its normalized form."""
+
+    line: int
+    start: int
+    end: int
+    norm: str
+    line_start: bool = False
+    line_end: bool = False
+
+
+def split_words(texts: Sequence[str]) -> List[Word]:
+    """
+    Split transcription lines into words, remembering the original breaks.
+
+    Tokens that normalize to nothing (``(?)``, ``=``) are glued to the
+    previous word of the line (or the next one at the start of a line).
+    """
+    words: List[Word] = []
+    for index, text in enumerate(texts):
+        dropped = [m.span() for m in _EDITORIAL_RE.finditer(text)]
+        line_words: List[Word] = []
+        for match in re.finditer(r"\S+", text):
+            kept = "".join(
+                c
+                for k, c in enumerate(match.group(), match.start())
+                if not any(a <= k < b for a, b in dropped)
+            )
+            norm = _normalize_kept(kept)
+            if line_words and (not norm or not line_words[-1].norm):
+                line_words[-1].end = match.end()
+                line_words[-1].norm += norm
+                continue
+            line_words.append(Word(index, match.start(), match.end(), norm))
+        if line_words:
+            line_words[0].line_start = True
+            line_words[-1].line_end = True
+        words.extend(line_words)
+    return words
+
+
+def words_text(texts: Sequence[str], words: Sequence[Word], a: int, b: int) -> str:
+    """Original text of ``words[a:b]``; pieces of different lines joined by a space."""
+    parts: List[List[int]] = []
+    for word in words[a:b]:
+        if parts and parts[-1][0] == word.line:
+            parts[-1][2] = word.end
+        else:
+            parts.append([word.line, word.start, word.end])
+    return " ".join(texts[line][start:end] for line, start, end in parts)
+
+
+def _word_band(
+    readings: Sequence[str], words: Sequence[Word], width: int
+) -> Tuple[List[int], List[int]]:
+    """Window of word positions per line, around a global character alignment."""
+    from rapidfuzz.distance import Levenshtein
+
+    joined_r = "".join(readings)
+    joined_t = "".join(w.norm for w in words)
+    # r2t[p]: position in the text aligned with position p of the readings
+    r2t = [0] * (len(joined_r) + 1)
+    for tag, r0, r1, t0, t1 in Levenshtein.opcodes(joined_r, joined_t):
+        for k in range(r0, r1 + 1):
+            r2t[k] = t0 + (min(k - r0, t1 - t0) if tag != "delete" else 0)
+    word_starts, pos = [], 0
+    for word in words:
+        word_starts.append(pos)
+        pos += len(word.norm)
+
+    lo, hi, pos = [], [], 0
+    for i in range(len(readings) + 1):
+        anchor = bisect.bisect_right(word_starts, r2t[pos]) - 1 if words else 0
+        lo.append(max(0, anchor - width))
+        hi.append(min(len(words), anchor + width))
+        if i < len(readings):
+            pos += len(readings[i])
+    hi[-1] = len(words)
+    for i in range(1, len(lo)):  # windows must move forward
+        lo[i] = max(lo[i], lo[i - 1])
+    for i in range(len(hi) - 2, -1, -1):
+        hi[i] = min(hi[i], hi[i + 1])
+    lo[0] = 0
+    return lo, hi
+
+
+AlignStep = Tuple[str, Optional[int], Optional[int], Optional[int], Optional[int]]
+
+
+def align_words(
+    readings: Sequence[str],
+    words: Sequence[Word],
+    skip_line_cost: float = 0.6,
+    skip_word_cost: float = 0.6,
+    break_penalty: float = 3.0,
+    band: int = 60,
+    max_states: int = 40000,
+) -> List[AlignStep]:
+    """
+    Cut a stream of transcription words into the spans read on each line.
+
+    Unlike ``align``, a line can take part of a transcription line or several
+    of them, so transcriptions whose line breaks do not follow the manuscript
+    can be paired too. Costs are edit distances on normalized text: pairing
+    a line with ``words[a:b]`` costs their distance (plus ``break_penalty``
+    for each end that does not fall on an original line break, so the
+    transcription's own breaks win when they fit); leaving a line or words
+    unpaired costs ``skip_*_cost`` per character.
+
+    Returns steps ``("pair", line, a, b, distance)``, ``("line", line, None,
+    None, None)`` (line without text) and ``("words", None, a, b, None)``
+    (words without line), in order.
+    """
+    reads = [normalize_for_matching(r or "") for r in readings]
+    n, m = len(reads), len(words)
+    if (n + 1) * (m + 1) > max_states and n and m:
+        lo, hi = _word_band(reads, words, band)
+    else:
+        lo, hi = [0] * (n + 1), [m] * (n + 1)
+
+    inf = float("inf")
+    cost = [[inf] * (m + 1) for _ in range(n + 1)]
+    back: List[List[Optional[Tuple[int, int, int]]]] = [
+        [None] * (m + 1) for _ in range(n + 1)
+    ]
+    cost[0][0] = 0.0
+    for i in range(n + 1):
+        row, row_back = cost[i], back[i]
+        for w in range(lo[i], hi[i] + 1):
+            here = row[w]
+            if here == inf:
+                continue
+            if w < hi[i]:  # leave word w without a line
+                c = here + skip_word_cost * len(words[w].norm)
+                if c < row[w + 1]:
+                    row[w + 1] = c
+                    row_back[w + 1] = (i, w, -1)
+            if i == n:
+                continue
+            reading = reads[i]
+            nxt, nxt_back = cost[i + 1], back[i + 1]
+            if lo[i + 1] <= w <= hi[i + 1]:  # leave line i without text
+                c = here + skip_line_cost * len(reading)
+                if c < nxt[w]:
+                    nxt[w] = c
+                    nxt_back[w] = (i, w, -2)
+            if w == m:
+                continue
+            limit = 2 * len(reading) + 20
+            start_penalty = 0.0 if words[w].line_start else break_penalty
+            span = ""
+            for v in range(w + 1, min(m, hi[i + 1]) + 1):
+                span += words[v - 1].norm
+                if len(span) > limit and v > w + 1:
+                    break
+                if v < lo[i + 1]:
+                    continue
+                c = here + _distance(reading, span) + start_penalty
+                if not words[v - 1].line_end:
+                    c += break_penalty
+                if c < nxt[v]:
+                    nxt[v] = c
+                    nxt_back[v] = (i, w, v)
+
+    if cost[n][m] == inf:  # the window missed the path: align without it
+        return align_words(
+            readings,
+            words,
+            skip_line_cost,
+            skip_word_cost,
+            break_penalty,
+            band,
+            max_states=(n + 1) * (m + 1),
+        )
+
+    steps: List[AlignStep] = []
+    i, w = n, m
+    while i or w:
+        pi, pw, kind = back[i][w]
+        if kind == -1:
+            if steps and steps[-1][0] == "words" and steps[-1][2] == w:
+                steps[-1] = ("words", None, pw, steps[-1][3], None)
+            else:
+                steps.append(("words", None, pw, w, None))
+        elif kind == -2:
+            steps.append(("line", pi, None, None, None))
+        else:
+            span = "".join(word.norm for word in words[pw:w])
+            steps.append(("pair", pi, pw, w, _distance(reads[pi], span)))
+        i, w = pi, pw
+    return steps[::-1]
+
+
+class _Cut:
+    """
+    The text paired with a line: ``words[start:end]``, plus the end of a word
+    broken on the previous line (``head``) and/or the start of one broken on
+    the next line (``tail``).
+    """
+
+    def __init__(
+        self, texts: Sequence[str], words: Sequence[Word], a: int, b: int, d: int
+    ):
+        self.texts, self.words = texts, words
+        self.start, self.end = a, b
+        self.head = self.tail = ("", "")  # (text, normalized)
+        self.distance = d
+
+    @property
+    def text(self) -> str:
+        parts = [
+            self.head[0],
+            words_text(self.texts, self.words, self.start, self.end),
+            self.tail[0],
+        ]
+        return " ".join(p for p in parts if p)
+
+    @property
+    def norm(self) -> str:
+        middle = "".join(w.norm for w in self.words[self.start : self.end])
+        return self.head[1] + middle + self.tail[1]
+
+
+def _split_broken_word(
+    raw_reading: str, read1: str, read2: str, first: _Cut, second: _Cut
+) -> bool:
+    """
+    Split a word the scribe broke across two lines; True if split.
+
+    Used where the cut falls inside a transcription line (the transcription
+    did not follow the manuscript's breaks). The last word of the first line
+    or the first word of the second one is split where the readings fit
+    best: by at least 2 edits when the first line's reading ends with a
+    hyphen (the first part then gets it), by at least 3 when the scribe broke
+    the word without one.
+    """
+    hyphen = raw_reading.rstrip()[-1:]
+    if hyphen not in HYPHENS:
+        hyphen = ""
+    words, texts = first.words, first.texts
+    best = (first.distance + second.distance - (2 if hyphen else 3), None)
+    candidates = []
+    if first.end - 1 >= first.start:
+        candidates.append(first.end - 1)  # last word of the first line
+    if second.start < second.end:
+        candidates.append(second.start)  # first word of the second line
+    for w in candidates:
+        word = words[w]
+        original = texts[word.line][word.start : word.end]
+        core = original.rstrip(".,;:")  # "Verdad," splits as "Ver" + "dad,"
+        if not core.isalpha() or len(word.norm) != len(core):
+            continue  # editorial marks or letters that normalize away
+        before = first.head[1] + "".join(x.norm for x in words[first.start : w])
+        after = "".join(x.norm for x in words[w + 1 : second.end])
+        for j in range(1, len(word.norm)):
+            d1 = _distance(read1, before + word.norm[:j])
+            d2 = _distance(read2, word.norm[j:] + after)
+            if d1 + d2 < best[0]:
+                best = (d1 + d2, (w, j, d1, d2))
+    if best[1] is None:
+        return False
+    w, j, d1, d2 = best[1]
+    word = words[w]
+    original = texts[word.line][word.start : word.end]
+    first.end = w
+    first.tail = (original[:j] + hyphen, word.norm[:j])
+    second.start = w + 1
+    second.head = (original[j:], word.norm[j:])
+    first.distance, second.distance = d1, d2
+    return True
+
+
 # ---------------------------------------------------------------------- #
 # Segmentation and recognition with kraken
 # ---------------------------------------------------------------------- #
@@ -398,8 +701,6 @@ class KrakenRecognizer:
         device: str = "cpu",
     ):
         _require_kraken()
-        from kraken.lib import models
-
         path = Path(model)
         if not path.exists():
             from htrmopo import get_model
@@ -413,8 +714,30 @@ class KrakenRecognizer:
                 raise FileNotFoundError(f"No model file in {model_dir}")
             path = files[0]
         self.name = path.stem
-        self.model = models.load_any(str(path), device=device)
+        self.path = path
+        self.device = device
+        self.model = self._load()
         self.cache_dir = Path(cache_dir) if cache_dir else None
+
+    def _load(self) -> Any:
+        """kraken >= 7 task API (reads .mlmodel and .safetensors), else load_any."""
+        try:
+            from kraken.tasks import RecognitionTaskModel
+        except ImportError:
+            from kraken.lib import models
+
+            return models.load_any(str(self.path), device=self.device)
+        return RecognitionTaskModel.load_model(self.path)
+
+    def __getstate__(self) -> Dict[str, Any]:
+        # Worker processes reload the model from its file instead of pickling it.
+        state = dict(self.__dict__)
+        state.pop("model", None)
+        return state
+
+    def __setstate__(self, state: Dict[str, Any]) -> None:
+        self.__dict__.update(state)
+        self.model = self._load()
 
     def __call__(self, image_path: Path, lines: Sequence[Line]) -> List[str]:
         key = hashlib.sha1(
@@ -446,13 +769,44 @@ class KrakenRecognizer:
         )
         logger.info(f"Recognizing {len(lines)} lines of {image_path}")
         with Image.open(image_path) as im:
-            readings = [
-                record.prediction for record in rpred.rpred(self.model, im, seg)
-            ]
+            if hasattr(self.model, "predict"):
+                from kraken.configs import RecognitionInferenceConfig
+
+                # Explicit accelerator: "auto" picks Apple's MPS, which hangs
+                accelerator = "cpu" if self.device == "cpu" else "auto"
+                config = RecognitionInferenceConfig(
+                    accelerator=accelerator, device="auto", num_line_workers=0
+                )
+                records = self.model.predict(im, seg, config)
+            else:
+                records = rpred.rpred(self.model, im, seg)
+            readings = [record.prediction for record in records]
         if cache:
             cache.parent.mkdir(parents=True, exist_ok=True)
             cache.write_text(json.dumps(readings, ensure_ascii=False))
         return readings
+
+
+# ---------------------------------------------------------------------- #
+# Worker processes (LinePairer.run with workers > 1)
+# ---------------------------------------------------------------------- #
+
+_worker_pairer: Optional["LinePairer"] = None
+
+
+def _init_worker(pairer: "LinePairer", threads: int) -> None:
+    global _worker_pairer
+    _worker_pairer = pairer
+    try:
+        import torch
+
+        torch.set_num_threads(threads)
+    except ImportError:
+        pass
+
+
+def _process_in_worker(task: "DocTask") -> Tuple[List["PageResult"], List[str]]:
+    return _worker_pairer.process_document(task)
 
 
 # ---------------------------------------------------------------------- #
@@ -545,7 +899,11 @@ def write_page_xml(
             if line.text:
                 attrs = {}
                 if line.cer is not None:
-                    attrs["conf"] = f"{max(0.0, 1 - line.cer):.3f}"
+                    # 1 - CER, kept >= 0.5 for confident pairs and below for
+                    # doubtful ones, whatever their CER
+                    conf = max(0.0, 1 - line.cer)
+                    conf = max(conf, 0.5) if line.confident else min(conf, 0.49)
+                    attrs["conf"] = f"{conf:.3f}"
                 equiv = ET.SubElement(line_el, q("TextEquiv"), **attrs)
                 ET.SubElement(equiv, q("Unicode")).text = line.text
 
@@ -604,6 +962,7 @@ class PageResult:
     size: Tuple[int, int] = (0, 0)
     texts: List[str] = field(default_factory=list)  # transcription lines assigned
     unpaired_texts: int = 0
+    unpaired_chars: int = 0
     reasons: List[str] = field(default_factory=list)
     error: Optional[str] = None
 
@@ -623,6 +982,9 @@ class LinePairer:
         fragment_ratio: float = 0.35,
         split_columns: bool = True,
         cer_threshold: float = 0.5,
+        max_cer: float = 0.75,
+        min_margin: float = 0.15,
+        review_tolerance: float = 0.2,
         export_lines: bool = False,
     ):
         """
@@ -635,7 +997,17 @@ class LinePairer:
             fragment_ratio: Short lines squeezed against a full line are
                 fragments (insertions) and get no text; see ``order_lines``
             split_columns: Split transcription lines on runs of 4+ spaces
-            cer_threshold: Highest CER for a pair to count as confident
+            cer_threshold: A pair with a CER up to this is confident (if it
+                matches its own text better than its neighbours' texts)
+            max_cer: A pair with a CER up to this is still confident when
+                its text fits clearly better than the neighbouring texts
+                (by ``min_margin``): the generic model misreads Zapotec, so
+                right pairs often have a high CER
+            min_margin: See ``max_cer``
+            review_tolerance: Share of a page's lines that may stay doubtful
+                (or of its transcription that may stay without a line) for
+                the page to go to ``auto/``; doubtful lines are written there
+                without text, so they are left out of training
             export_lines: Also write crops + .gt.txt of confident lines
         """
         self.segmenter = segmenter
@@ -644,6 +1016,9 @@ class LinePairer:
         self.fragment_ratio = fragment_ratio
         self.split_columns = split_columns
         self.cer_threshold = cer_threshold
+        self.max_cer = max_cer
+        self.min_margin = min_margin
+        self.review_tolerance = review_tolerance
         self.export_lines = export_lines
 
     # -- input -------------------------------------------------------- #
@@ -674,7 +1049,7 @@ class LinePairer:
 
                 doc_id = ticha_id_from_url(str(row["url"])) or str(row["url"])
             status = row.get("trptn_status")
-            transcription = row.get("transcription")
+            transcription = strip_office_markup(row.get("transcription"))
             image_paths = row.get("image_paths")
 
             reason = None
@@ -733,7 +1108,7 @@ class LinePairer:
             result.regions = segmentation.get("regions", [])
             if self.recognizer and result.main:
                 readings = self.recognizer(page.path, result.main)
-                for line, reading in zip(result.main, readings):
+                for line, reading in zip(result.main, readings, strict=True):
                     line.reading = reading
         except Exception as e:
             logger.error(f"Failed {page.path}: {e}")
@@ -759,7 +1134,8 @@ class LinePairer:
 
         if by_folio and all(f in by_folio for f in image_folios):
             units = [
-                ([r], lines_of(by_folio[f])) for r, f in zip(results, image_folios)
+                ([r], lines_of(by_folio[f]))
+                for r, f in zip(results, image_folios, strict=True)
             ]
             missing = [f for f in by_folio if f not in image_folios]
             notes = (
@@ -779,47 +1155,155 @@ class LinePairer:
                 pages[0].unpaired_texts += len(texts)
             return
 
+        # path: (line index | None, text | None, chars of unpaired text)
+        path: List[Tuple[Optional[int], Optional[str], int]]
         if self.recognizer:
-            path = align([line.reading or "" for _, line in sequence], texts)
+            path = self._align_with_readings(sequence, texts)
         elif len(pages) == 1 and len(sequence) == len(texts):
-            path = [(i, i, None) for i in range(len(texts))]
+            path = [(i, texts[i], 0) for i in range(len(texts))]
+            for _, line in sequence:
+                line.confident = True
         else:
             # No recognizer and counts differ: pre-fill in order for review.
             k = min(len(sequence), len(texts))
-            path = [(i, i, None) for i in range(k)]
-            path += [(i, None, None) for i in range(k, len(sequence))]
-            path += [(None, j, None) for j in range(k, len(texts))]
+            path = [(i, texts[i], 0) for i in range(k)]
+            path += [(i, None, 0) for i in range(k, len(sequence))]
+            path += [
+                (None, texts[j], len(normalize_for_matching(texts[j])))
+                for j in range(k, len(texts))
+            ]
+            segmented = len(sequence)
             for page in pages:
-                segmented = sum(len(p.main) for p in pages)
                 page.reasons.append(
                     f"line count mismatch: {segmented} segmented, "
                     f"{len(texts)} transcribed"
                 )
+            for i in range(k):
+                sequence[i][1].confident = True
 
         current: Optional[PageResult] = None
-        pending: List[str] = []  # unpaired texts before the next pairing
-        for line_index, text_index, error in path:
+        pending: List[Tuple[str, int]] = []  # unpaired texts before the next pairing
+        for line_index, text, chars in path:
             if line_index is not None:
                 page, line = sequence[line_index]
-                if text_index is not None:
-                    line.text = texts[text_index]
-                    line.cer = error
-                    line.confident = error is None or error <= self.cer_threshold
+                if text is not None:
+                    line.text = text
                     # Unpaired texts between two pairs belong to both pages
                     for target in {id(p): p for p in (current, page) if p}.values():
                         target.unpaired_texts += len(pending)
-                    page.texts.extend(pending)
-                    page.texts.append(texts[text_index])
+                        target.unpaired_chars += sum(c for _, c in pending)
+                    page.texts.extend(t for t, _ in pending)
+                    page.texts.append(text)
                     pending = []
                     current = page
                 elif current is None:
                     current = page
             else:
-                pending.append(texts[text_index])
+                pending.append((text, chars))
         if pending:
             last = current or pages[-1]
-            last.texts.extend(pending)
+            last.texts.extend(t for t, _ in pending)
             last.unpaired_texts += len(pending)
+            last.unpaired_chars += sum(c for _, c in pending)
+
+    def _align_with_readings(
+        self, sequence: List[Tuple[PageResult, Line]], texts: List[str]
+    ) -> List[Tuple[Optional[int], Optional[str], int]]:
+        """
+        Align line readings with the transcription words; set CER, margin
+        and confidence of each paired line.
+
+        A pair is confident when its text fits the reading better than the
+        texts of the neighbouring pairs (an off-by-one alignment fits a
+        neighbour as well) and either its CER is at most ``cer_threshold``
+        or, up to ``max_cer``, it beats the neighbours by ``min_margin``.
+        Pairs whose boundary with the next pair falls inside a transcription
+        line and could move by one word at no cost are not confident.
+        """
+        words = split_words(texts)
+        reads = [normalize_for_matching(line.reading or "") for _, line in sequence]
+        steps = align_words([line.reading or "" for _, line in sequence], words)
+
+        def span(a: int, b: int) -> str:
+            return "".join(w.norm for w in words[a:b])
+
+        def error(reading: str, reference: str) -> float:
+            if not reference:
+                return 0.0 if not reading else 1.0
+            return _distance(reading, reference) / len(reference)
+
+        pairs = [s for s in steps if s[0] == "pair"]
+        ambiguous = set()  # boundaries (index of the first pair) that could move
+        for i, ((_, k1, a1, b1, d1), (_, k2, a2, b2, d2)) in enumerate(pairwise(pairs)):
+            if b1 != a2 or (words[b1 - 1].line_end and words[a2].line_start):
+                continue  # not contiguous, or on an original line break
+            now = d1 + d2
+            moves = []
+            if b1 - 1 > a1:  # last word of the first line to the second one
+                moves.append(
+                    _distance(reads[k1], span(a1, b1 - 1))
+                    + _distance(reads[k2], span(b1 - 1, b2))
+                )
+            if a2 + 1 < b2:  # first word of the second line to the first one
+                moves.append(
+                    _distance(reads[k1], span(a1, a2 + 1))
+                    + _distance(reads[k2], span(a2 + 1, b2))
+                )
+            if moves and min(moves) <= now:
+                ambiguous.add(i)
+
+        cut = {k: _Cut(texts, words, a, b, d) for _, k, a, b, d in pairs}
+        for i, ((_, k1, _, b1, _), (_, k2, a2, _, _)) in enumerate(pairwise(pairs)):
+            if (
+                b1 == a2
+                and not words[a2].line_start
+                and _split_broken_word(
+                    sequence[k1][1].reading or "",
+                    reads[k1],
+                    reads[k2],
+                    cut[k1],
+                    cut[k2],
+                )
+            ):
+                ambiguous.discard(i)  # the split settled where the line breaks
+        ambiguous_lines = {k for i in ambiguous for k in (pairs[i][1], pairs[i + 1][1])}
+
+        for index, (_, k, _, _, _) in enumerate(pairs):
+            line = sequence[k][1]
+            own, d = cut[k].norm, cut[k].distance
+            line.cer = d / len(own) if own else (0.0 if not reads[k] else 1.0)
+            neighbours = [
+                pairs[j][1]
+                for j in (index - 2, index - 1, index + 1, index + 2)
+                if 0 <= j < len(pairs)
+            ]
+            if neighbours:
+                line.margin = (
+                    min(error(reads[k], cut[n].norm) for n in neighbours) - line.cer
+                )
+            # The model misreads letters but rarely drops or invents many:
+            # a reading much shorter or longer than its text is a bad cut.
+            ratio = len(reads[k]) / max(1, len(own))
+            beats = line.margin is None or line.margin > 0
+            line.confident = k not in ambiguous_lines and (
+                (line.cer <= self.cer_threshold and beats and 0.7 <= ratio <= 1.4)
+                or (
+                    line.cer <= self.max_cer
+                    and line.margin is not None
+                    and line.margin >= self.min_margin
+                    and 0.8 <= ratio <= 1.25
+                )
+            )
+
+        path: List[Tuple[Optional[int], Optional[str], int]] = []
+        for kind, k, a, b, _ in steps:
+            if kind == "pair":
+                path.append((k, cut[k].text, 0))
+            elif kind == "line":
+                path.append((k, None, 0))
+            else:
+                path.append((None, words_text(texts, words, a, b), len(span(a, b))))
+        return path
 
     def process_document(self, task: DocTask) -> Tuple[List[PageResult], List[str]]:
         """Segment, recognize and align one document."""
@@ -828,7 +1312,86 @@ class LinePairer:
         units, notes = self._units(task, ok)
         for pages, texts in units:
             self._pair_unit(pages, texts)
+        if self.recognizer and units and all(len(pages) == 1 for pages, _ in units):
+            notes = notes + self._retry_other_folios(task, units)
         return results, notes
+
+    @staticmethod
+    def _confident_count(page: PageResult) -> int:
+        return sum(1 for ln in page.main if ln.text and ln.confident)
+
+    @staticmethod
+    def _snapshot(page: PageResult) -> Tuple[Any, ...]:
+        return (
+            [(ln.text, ln.cer, ln.margin, ln.confident) for ln in page.main],
+            list(page.texts),
+            page.unpaired_texts,
+            page.unpaired_chars,
+        )
+
+    @staticmethod
+    def _restore(page: PageResult, snapshot: Tuple[Any, ...]) -> None:
+        lines, texts, unpaired_texts, unpaired_chars = snapshot
+        for line, (text, error, margin, confident) in zip(
+            page.main, lines, strict=True
+        ):
+            line.text, line.cer, line.margin, line.confident = (
+                text,
+                error,
+                margin,
+                confident,
+            )
+        page.texts, page.unpaired_texts, page.unpaired_chars = (
+            list(texts),
+            unpaired_texts,
+            unpaired_chars,
+        )
+
+    def _retry_other_folios(
+        self, task: DocTask, units: List[Tuple[List[PageResult], List[str]]]
+    ) -> List[str]:
+        """
+        Pair badly paired pages with the other folios' transcriptions.
+
+        Image folios and transcription folio markers sometimes disagree (a
+        verso labelled as the recto, pages in another order). A page where
+        fewer than half of its pairs are confident is aligned again with each
+        other folio's text, and keeps the one that pairs at least twice as
+        many lines confidently (5 or more, and half of its pairs).
+        """
+        folios = [
+            (folio, transcription_lines(text, self.split_columns))
+            for folio, text in split_transcription_pages(task.transcription)
+            if folio
+        ]
+        if len(folios) < 2:
+            return []
+        notes = []
+        for pages, texts in units:
+            page = pages[0]
+            paired = [ln for ln in page.main if ln.text]
+            confident = self._confident_count(page)
+            if len(paired) < 3 or confident >= 0.5 * len(paired):
+                continue
+            best_count, best, best_folio = confident, self._snapshot(page), None
+            for folio, candidate in folios:
+                if candidate == texts:
+                    continue
+                self._restore(
+                    page, ([(None, None, None, False)] * len(page.main), [], 0, 0)
+                )
+                self._pair_unit([page], candidate)
+                count = self._confident_count(page)
+                paired_now = sum(1 for ln in page.main if ln.text)
+                if count >= max(2 * best_count, 5) and count >= 0.5 * paired_now:
+                    best_count, best, best_folio = count, self._snapshot(page), folio
+            self._restore(page, best)
+            if best_folio:
+                notes.append(
+                    f"page {page.image.number} paired with folio {best_folio} "
+                    f"(image folio {page.image.folio})"
+                )
+        return notes
 
     def run(
         self,
@@ -836,8 +1399,19 @@ class LinePairer:
         images_csv: Any,
         output_dir: Any,
         max_documents: Optional[int] = None,
+        workers: int = 1,
+        threads_per_worker: Optional[int] = None,
     ) -> pd.DataFrame:
-        """Run the full pipeline; returns the manifest (one row per page)."""
+        """
+        Run the full pipeline; returns the manifest (one row per page).
+
+        Args:
+            workers: Documents processed in parallel, each in its own process
+                with its own copy of the models (mind the RAM: ~2 GB per
+                worker with kraken on a 2500x3500 page). 1 processes them in this process.
+            threads_per_worker: Torch threads per worker (default: CPU
+                cores / workers)
+        """
         output_dir = Path(output_dir)
         if self.segmenter is None:
             self.segmenter = KrakenSegmenter(cache_dir=output_dir / "segmentation")
@@ -848,9 +1422,15 @@ class LinePairer:
 
         rows: List[Dict[str, Any]] = list(skipped)
         line_rows: List[Dict[str, Any]] = []
-        for index, task in enumerate(tasks, 1):
+        for index, (task, (results, notes)) in enumerate(
+            zip(
+                tasks,
+                self._process_all(tasks, workers, threads_per_worker),
+                strict=True,
+            ),
+            1,
+        ):
             logger.info(f"[{index}/{len(tasks)}] {task.doc_id}")
-            results, notes = self.process_document(task)
             for result in results:
                 row, lines = self._write_page(task, result, notes, output_dir)
                 rows.append(row)
@@ -861,6 +1441,67 @@ class LinePairer:
         manifest.to_csv(output_dir / "manifest.csv", index=False)
         pd.DataFrame(line_rows).to_csv(output_dir / "lines.csv", index=False)
         return manifest
+
+    def _process_all(
+        self,
+        tasks: List[DocTask],
+        workers: int,
+        threads_per_worker: Optional[int],
+    ) -> Iterable[Tuple[List[PageResult], List[str]]]:
+        """Process documents in order, in worker processes when workers > 1."""
+        if workers <= 1 or len(tasks) <= 1:
+            for task in tasks:
+                yield self.process_document(task)
+            return
+        threads = threads_per_worker or max(1, (os.cpu_count() or 1) // workers)
+        with ProcessPoolExecutor(
+            max_workers=min(workers, len(tasks)),
+            mp_context=multiprocessing.get_context("spawn"),
+            initializer=_init_worker,
+            initargs=(self, threads),
+        ) as pool:
+            yield from pool.map(_process_in_worker, tasks)
+
+    def _page_status(
+        self, result: PageResult, notes: List[str]
+    ) -> Tuple[str, List[str]]:
+        """
+        ``auto`` or ``review``, and the reasons (also given for auto pages).
+
+        ``untranscribed`` when no transcription text was assigned to the
+        page. A page goes to review when nothing could be paired, or when more
+        than ``review_tolerance`` of its pairs are doubtful or of its
+        transcription (in characters) found no line.
+        """
+        main = result.main
+        paired = [ln for ln in main if ln.text]
+        doubtful = [ln for ln in paired if not ln.confident]
+        transcribed = result.unpaired_chars + sum(
+            len(normalize_for_matching(ln.text)) for ln in paired
+        )
+        reasons = list(result.reasons)
+        if not paired and not result.unpaired_chars and not reasons:
+            # Nothing of the transcription belongs here (blank page, cover,
+            # untranscribed page): nothing to train on or to review.
+            return "untranscribed", ["no transcription for this page"] + notes
+        blocking = bool(reasons)
+        if not main:
+            reasons.append("no lines segmented")
+            blocking = True
+        if not paired and main:
+            reasons.append("no transcription paired")
+            blocking = True
+        if result.unpaired_texts:
+            reasons.append(
+                f"{result.unpaired_texts} transcription part(s) without a line "
+                f"({result.unpaired_chars} chars)"
+            )
+            blocking |= result.unpaired_chars > self.review_tolerance * transcribed
+        if doubtful:
+            reasons.append(f"{len(doubtful)} low-confidence pair(s)")
+            blocking |= len(doubtful) > self.review_tolerance * len(paired)
+        reasons.extend(notes)
+        return ("review" if blocking else "auto"), reasons
 
     def _write_page(
         self,
@@ -885,25 +1526,29 @@ class LinePairer:
         main = result.main
         paired = [ln for ln in main if ln.text]
         doubtful = [ln for ln in paired if not ln.confident]
-        reasons = list(result.reasons)
-        if not main:
-            reasons.append("no lines segmented")
-        if not paired and main:
-            reasons.append("no transcription paired")
-        if result.unpaired_texts:
-            reasons.append(
-                f"{result.unpaired_texts} transcription line(s) without a line"
-            )
-        if doubtful:
-            reasons.append(f"{len(doubtful)} low-confidence pair(s)")
-        reasons.extend(notes)
-        status = "review" if reasons and not (notes and reasons == notes) else "auto"
+        doubtful_ids = {id(ln) for ln in doubtful}
+        status, reasons = self._page_status(result, notes)
 
         target = output_dir / status
+        # A page re-run with other settings may change folder: drop old copies
+        for other in PAGE_STATUSES:
+            if other != status:
+                for old in (output_dir / other).glob(f"{stem}.*"):
+                    old.unlink()
         image_name = f"{stem}{page.path.suffix}"
         _place_image(page.path, target / image_name)
+        # Doubtful lines of auto pages are written without text: they are
+        # left out of training instead of sending the page to review.
+        xml_lines = (
+            [
+                replace(ln, text=None) if id(ln) in doubtful_ids else ln
+                for ln in result.lines
+            ]
+            if status == "auto"
+            else result.lines
+        )
         write_page_xml(
-            result.lines,
+            xml_lines,
             result.regions,
             image_name,
             result.size,
