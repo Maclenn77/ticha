@@ -32,6 +32,8 @@ keywords = ["zapotec", "manuscripts", "digital humanities", "web scraping", "htr
 classifiers = [
     "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Science/Research",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
     "Topic :: Internet :: WWW/HTTP :: Browsers",
     "Topic :: Scientific/Engineering :: Information Analysis",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",

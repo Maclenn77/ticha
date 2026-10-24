@@ -53,7 +53,7 @@ and stops otherwise.
 
 | File | Use |
 |---|---|
-| [`environment.yml`](environment.yml) | The requirements (minimum versions; kraken, transformers and the packages that conflict pinned). Works on macOS, Linux and Windows. Use this one normally. |
+| [`environment.yml`](environment.yml) | The requirements (minimum versions; kraken, transformers and the packages that conflict pinned). Tested on macOS and Linux; **not tested on Windows**. Use this one normally. |
 | [`environment.osx-arm64.lock.yml`](environment.osx-arm64.lock.yml) | Exact versions of every package in the environment the pipeline was tested with, on macOS / Apple Silicon. Use it to reproduce results exactly on that platform: `conda env create -f environment.osx-arm64.lock.yml` |
 
 Main versions in the tested environment:
@@ -133,10 +133,11 @@ TICHA_DATA=/Volumes/disk/ticha-data jupyter lab notebooks/ticha_data_preparation
 ## Continuous integration
 
 The [`Tests`](.github/workflows/tests.yml) workflow checks formatting (ruff,
-black) and runs the tests on Python 3.10-3.12 on every push and pull request.
+black) and runs the tests on Python 3.10 and 3.12 (the oldest and newest
+supported versions) on Linux on every push and pull request.
 On pull requests to `main` (or when started by hand) it also builds this
 environment from scratch, from `environment.yml` on Linux and macOS and from
-the lock file on Apple Silicon, and runs the tests inside it.
+the lock file on Apple Silicon, and runs the tests inside it. Nothing is tested on Windows.
 
 ## Updating the environment
 

@@ -367,6 +367,8 @@ the texts are joined in order, metadata comes from their `overview` page, and
 ## Requirements
 
 - Python 3.10+
+- Linux or macOS. CI tests Python 3.10 and 3.12 on Linux and builds the
+  conda environment on Linux and macOS; **Windows is not tested**.
 - Chrome (for the Selenium-based `manuscripts` and `texts` commands)
 - `lines` extra: kraken and PyTorch
 - `htr` extra: PyTorch and transformers
