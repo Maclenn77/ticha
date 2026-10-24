@@ -222,8 +222,11 @@ ticha_augmented/
 
 # Pipeline data (downloads, paired pages, splits)
 data/
-# Contact sheets written by `ticha-scraper check`
+# Contact sheets written by `ticha check`
 check/
+
+# Experiments left out of the report: kept locally, not published
+notebooks/train/not_in_report/
 
 # Local secrets: GCP service-account key and the VM Jupyter URL (contains its token)
 key.json
