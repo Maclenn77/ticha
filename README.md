@@ -328,8 +328,36 @@ editorial notes.
 - [`notebooks/reports/`](notebooks/reports): evaluation of the models and the
   metrics in the report.
 
-Set up their conda environment as described in [`ENVIRONMENT.md`](ENVIRONMENT.md);
-GPU training on a VM is covered there too.
+#### Models in the report
+
+The training notebooks save each model under `$TICHA_RUNS_DIR` (default
+`~/ticha-runs`), where the later notebooks read it. Run them in this order,
+because each one reads the models of the previous ones:
+
+| Order | Notebook | Models in the report | Run folder |
+|---|---|---|---|
+| 1 | [`train/ticha_trocr_finetuning.ipynb`](notebooks/train/ticha_trocr_finetuning.ipynb) | **Smoothing, cosine** (run D) | `trocr-base-handwritten-finetuned-smooth-cosine` |
+| 2 | [`train/ticha_trocr_ablation_smoothing_schedule.ipynb`](notebooks/train/ticha_trocr_ablation_smoothing_schedule.ipynb) | **No smoothing, linear** (run A) | `ablation-smoothing-schedule/a-no-smoothing-linear` |
+| | | **Smoothing, linear** (run B) | `ablation-smoothing-schedule/b-smoothing-linear` |
+| | | **Smoothing, linear + augmentation** (run E, the best fine-tuned model) | `ablation-smoothing-schedule/e-smoothing-linear-augmentation` |
+| 3 | [`train/ticha_trocr_beams_r2l_rerank.ipynb`](notebooks/train/ticha_trocr_beams_r2l_rerank.ipynb) | **Right-to-left reranker** | `trocr-base-handwritten-finetuned-smooth-cosine-aug-r2l-th687` |
+| | | **Run E with 5, 8 or 10 beams and with reranking**; the best system is run E + 10 beams + right-to-left rerank (new decodings of run E, not new models) | `beams-r2l-rerank-linear-aug-th687` |
+| 4 | [`reports/ticha_trocr_evaluation.ipynb`](notebooks/reports/ticha_trocr_evaluation.ipynb) | **Pretrained (no fine-tuning)**: `microsoft/trocr-base-handwritten`, scored zero-shot | `evaluation/` |
+| 5 | [`reports/ticha_report_metrics.ipynb`](notebooks/reports/ticha_report_metrics.ipynb) | None: collects the numbers, tables and figures of the report | `data/evaluation/report_metrics/` in the repository |
+
+The fine-tuning notebook also trains two runs that the ablation uses as
+reference points but the report's table leaves out: the 5-epoch first run
+(`trocr-base-handwritten-finetuned`) and smoothing + cosine + augmentation
+(`trocr-base-handwritten-finetuned-smooth-cosine-aug`). The ablation also trains
+run C (no smoothing, cosine schedule). The models that read new lines,
+[`maclenn77/ticha-trocr-base`](https://huggingface.co/maclenn77/ticha-trocr-base),
+are published, so [`train/ticha_trocr_usage_example.ipynb`](notebooks/train/ticha_trocr_usage_example.ipynb)
+needs no training.
+
+The dataset pipeline and the report notebooks use the conda environment
+described in [`ENVIRONMENT.md`](ENVIRONMENT.md). The training notebooks run on
+a GPU machine with [`requirements-trocr.txt`](requirements-trocr.txt), also
+described there.
 
 ## Data Structure
 
