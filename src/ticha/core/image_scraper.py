@@ -445,7 +445,9 @@ class TichaImageScraper:
         positions = [(col, row) for row in range(rows) for col in range(cols)]
         canvas = Image.new("RGB", (width, height), "white")
         with ThreadPoolExecutor(max_workers=self.tile_workers) as pool:
-            for (col, row), tile in zip(positions, pool.map(fetch, positions)):
+            for (col, row), tile in zip(
+                positions, pool.map(fetch, positions), strict=True
+            ):
                 # Tiles beyond the first row/column carry `overlap` extra
                 # pixels on their left/top edge.
                 x = col * info.tile_size - (info.overlap if col else 0)

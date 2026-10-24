@@ -92,7 +92,7 @@ def write_shards(rows: pd.DataFrame, spec: dict, folder: Path, split: str) -> li
     schema = arrow_schema(spec)
     sizes = rows["image_path"].map(lambda p: Path(p).stat().st_size)
     shards, current, total = [], [], 0
-    for index, size in zip(rows.index, sizes):
+    for index, size in zip(rows.index, sizes, strict=True):
         if current and total + size > SHARD_BYTES:
             shards.append(current)
             current, total = [], 0
@@ -128,7 +128,7 @@ def original_rows(data: Path, split: str, meta: pd.DataFrame) -> pd.DataFrame:
     lines = lines[~lines["doc_id"].isin(EXCLUDED_DOCS)]
     lines["id"] = [
         line_id(d, p, n)
-        for d, p, n in zip(lines["doc_id"], lines["page"], lines["line"])
+        for d, p, n in zip(lines["doc_id"], lines["page"], lines["line"], strict=True)
     ]
     lines["image_path"] = lines["image"]
     lines = lines.merge(meta, left_on="doc_id", right_index=True, how="left").fillna("")

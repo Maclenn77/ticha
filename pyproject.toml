@@ -65,8 +65,8 @@ htr = [
 dev = [
     "pytest>=7.0.0",
     "pytest-mock>=3.10.0",
-    "black>=23.0.0",
-    "ruff>=0.1.0",
+    "black==24.8.0",  # pinned: other versions format differently
+    "ruff==0.6.9",
     "mypy>=1.0.0",
 ]
 
@@ -95,3 +95,6 @@ target-version = "py310"
 
 [tool.ruff.lint]
 select = ["E", "F", "B", "SIM", "I"]
+# black sets the line length; the lines it leaves long are strings, comments and
+# docstrings (some are the dataset card text), so E501 would only repeat it
+ignore = ["E501"]

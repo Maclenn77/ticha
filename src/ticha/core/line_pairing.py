@@ -49,6 +49,7 @@ import xml.etree.ElementTree as ET
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
+from itertools import pairwise
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
@@ -226,7 +227,7 @@ def _mark_fragments(
         (ln for ln in lines if ln.width >= fragment_ratio * reference),
         key=lambda ln: ln.y,
     )
-    gaps = [b.y - a.y for a, b in zip(full, full[1:]) if b.y - a.y > 1]
+    gaps = [b.y - a.y for a, b in pairwise(full) if b.y - a.y > 1]
     spacing = statistics.median(gaps) if gaps else float("inf")
     for line in lines:
         if line.width < tiny_ratio * reference:
@@ -241,7 +242,7 @@ def _mark_fragments(
 def _band_order(lines: List[Line]) -> List[Line]:
     """Top to bottom; lines side by side at the same height left to right."""
     main = sorted((ln for ln in lines if not ln.fragment), key=lambda ln: ln.y)
-    gaps = [b.y - a.y for a, b in zip(main, main[1:]) if b.y - a.y > 1]
+    gaps = [b.y - a.y for a, b in pairwise(main) if b.y - a.y > 1]
     tolerance = 0.5 * statistics.median(gaps) if gaps else 0
 
     bands: List[List[Line]] = []
@@ -1107,7 +1108,7 @@ class LinePairer:
             result.regions = segmentation.get("regions", [])
             if self.recognizer and result.main:
                 readings = self.recognizer(page.path, result.main)
-                for line, reading in zip(result.main, readings):
+                for line, reading in zip(result.main, readings, strict=True):
                     line.reading = reading
         except Exception as e:
             logger.error(f"Failed {page.path}: {e}")
@@ -1133,7 +1134,8 @@ class LinePairer:
 
         if by_folio and all(f in by_folio for f in image_folios):
             units = [
-                ([r], lines_of(by_folio[f])) for r, f in zip(results, image_folios)
+                ([r], lines_of(by_folio[f]))
+                for r, f in zip(results, image_folios, strict=True)
             ]
             missing = [f for f in by_folio if f not in image_folios]
             notes = (
@@ -1232,9 +1234,7 @@ class LinePairer:
 
         pairs = [s for s in steps if s[0] == "pair"]
         ambiguous = set()  # boundaries (index of the first pair) that could move
-        for i, ((_, k1, a1, b1, d1), (_, k2, a2, b2, d2)) in enumerate(
-            zip(pairs, pairs[1:])
-        ):
+        for i, ((_, k1, a1, b1, d1), (_, k2, a2, b2, d2)) in enumerate(pairwise(pairs)):
             if b1 != a2 or (words[b1 - 1].line_end and words[a2].line_start):
                 continue  # not contiguous, or on an original line break
             now = d1 + d2
@@ -1253,9 +1253,7 @@ class LinePairer:
                 ambiguous.add(i)
 
         cut = {k: _Cut(texts, words, a, b, d) for _, k, a, b, d in pairs}
-        for i, ((_, k1, _, b1, _), (_, k2, a2, _, _)) in enumerate(
-            zip(pairs, pairs[1:])
-        ):
+        for i, ((_, k1, _, b1, _), (_, k2, a2, _, _)) in enumerate(pairwise(pairs)):
             if (
                 b1 == a2
                 and not words[a2].line_start
@@ -1334,7 +1332,9 @@ class LinePairer:
     @staticmethod
     def _restore(page: PageResult, snapshot: Tuple[Any, ...]) -> None:
         lines, texts, unpaired_texts, unpaired_chars = snapshot
-        for line, (text, error, margin, confident) in zip(page.main, lines):
+        for line, (text, error, margin, confident) in zip(
+            page.main, lines, strict=True
+        ):
             line.text, line.cer, line.margin, line.confident = (
                 text,
                 error,
@@ -1423,7 +1423,12 @@ class LinePairer:
         rows: List[Dict[str, Any]] = list(skipped)
         line_rows: List[Dict[str, Any]] = []
         for index, (task, (results, notes)) in enumerate(
-            zip(tasks, self._process_all(tasks, workers, threads_per_worker)), 1
+            zip(
+                tasks,
+                self._process_all(tasks, workers, threads_per_worker),
+                strict=True,
+            ),
+            1,
         ):
             logger.info(f"[{index}/{len(tasks)}] {task.doc_id}")
             for result in results:
