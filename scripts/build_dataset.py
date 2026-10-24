@@ -39,6 +39,8 @@ sys.path.insert(0, str(ROOT / "src"))
 from ticha.core.augmentation import Augmenter, DatasetAugmenter  # noqa: E402
 from ticha.core.line_pairing import crop_line  # noqa: E402
 
+from dataset_exclusions import EXCLUDED_DOCS  # noqa: E402
+
 SPLIT_RATIOS = {"train": 0.8, "validation": 0.1, "test": 0.1}
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".tif", ".tiff"}
 
@@ -264,6 +266,12 @@ def main() -> None:
           f"by source: {pages['source'].value_counts().to_dict()}; pending review: {len(pending)}")
 
     table = split_documents(pages, args.seed)
+    # Excluded after the split, so every other document keeps the split it had before.
+    excluded = [doc_id for doc_id in EXCLUDED_DOCS if doc_id in table.index]
+    table = table.drop(index=excluded)
+    pages = pages[~pages["doc_id"].isin(excluded)]
+    if excluded:
+        print(f"Excluded documents: {excluded}")
     splits_dir.mkdir(parents=True, exist_ok=True)
     table.to_csv(splits_dir / "splits.csv")
     lines = cut_lines(pages, table, splits_dir, args.min_conf)

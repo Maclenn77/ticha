@@ -9,5 +9,6 @@ accelerate>=0.26
 jiwer>=3.0
 matplotlib
 pandas
+jinja2>=3.1.2  # pandas to_latex (the image ships 3.0.3)
 jupyterlab
 ipykernel
