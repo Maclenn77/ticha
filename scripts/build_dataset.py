@@ -1,4 +1,4 @@
-"""Build the line dataset (steps 6-10 of notebooks/ticha_pipeline.ipynb).
+"""Build the line dataset (steps 6-10 of notebooks/ticha_data_preparation_pipeline.ipynb).
 
 Reads the output of ``ticha lines`` (``data/paired``) and the pages
 corrected by hand (``data/reviewed``), and writes two separate datasets:
