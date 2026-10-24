@@ -20,8 +20,9 @@ jobs:
           python-version: "3.12"
       # The versions pinned in the dev extra of pyproject.toml
       - run: pip install black==24.8.0 ruff==0.6.9
-      - run: ruff check src scripts tests
-      - run: black --check src scripts tests
+      # notebooks/train/*.py: the modules shared by the training notebooks (not the notebooks)
+      - run: ruff check src scripts tests notebooks/train/*.py
+      - run: black --check src scripts tests notebooks/train/*.py
 
   tests:
     runs-on: ubuntu-latest

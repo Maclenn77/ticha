@@ -323,8 +323,26 @@ editorial notes.
 - [`notebooks/ticha_data_preparation_pipeline.ipynb`](notebooks/ticha_data_preparation_pipeline.ipynb):
   every step from downloading to the final train/validation/test dataset with
   augmentation, using the code in `src/` directly.
-- [`notebooks/train/`](notebooks/train): TrOCR fine-tuning, the right-to-left
-  reranker, an ablation and a usage example.
+- [`notebooks/ticha_trocr_usage_example.ipynb`](notebooks/ticha_trocr_usage_example.ipynb):
+  reading manuscript lines with the published models; no training needed.
+- [`notebooks/train/`](notebooks/train): TrOCR training: fine-tuning, the
+  ablation of label smoothing and the learning-rate schedule, and the
+  right-to-left reranker. The notebooks share their settings and code through
+  four modules in the same folder, so every model is trained and scored on the
+  same data in the same way. Training hyperparameters stay in each notebook.
+  - [`trocr_setup.py`](notebooks/train/trocr_setup.py): runs folder, pretrained
+    model, dataset version, seed, decoder start token.
+  - [`trocr_data.py`](notebooks/train/trocr_data.py): loading, cleaning
+    (`ticha.core.htr.clean_text`) and the checks (no document in two splits,
+    no train document repeating evaluation lines).
+  - [`trocr_model.py`](notebooks/train/trocr_model.py): batch collators, model
+    setup for training and decoding, validation metrics.
+  - [`trocr_eval.py`](notebooks/train/trocr_eval.py): decoding a split, CER and
+    WER by language, paired bootstrap.
+- [`notebooks/train/trained/`](notebooks/train/trained): the training notebooks
+  exactly as they ran to produce the models in the report, with their outputs.
+  They predate the shared modules, so their code is self-contained; a note at
+  the top of each says what the run used.
 - [`notebooks/reports/`](notebooks/reports): evaluation of the models and the
   metrics in the report.
 
@@ -334,16 +352,16 @@ The training notebooks save each model under `$TICHA_RUNS_DIR` (default
 `~/ticha-runs`), where the later notebooks read it. Run them in this order,
 because each one reads the models of the previous ones:
 
-| Order | Notebook | Models in the report | Run folder |
-|---|---|---|---|
-| 1 | [`train/ticha_trocr_finetuning.ipynb`](notebooks/train/ticha_trocr_finetuning.ipynb) | **Smoothing, cosine** (run D) | `trocr-base-handwritten-finetuned-smooth-cosine` |
-| 2 | [`train/ticha_trocr_ablation_smoothing_schedule.ipynb`](notebooks/train/ticha_trocr_ablation_smoothing_schedule.ipynb) | **No smoothing, linear** (run A) | `ablation-smoothing-schedule/a-no-smoothing-linear` |
-| | | **Smoothing, linear** (run B) | `ablation-smoothing-schedule/b-smoothing-linear` |
-| | | **Smoothing, linear + augmentation** (run E, the best fine-tuned model) | `ablation-smoothing-schedule/e-smoothing-linear-augmentation` |
-| 3 | [`train/ticha_trocr_beams_r2l_rerank.ipynb`](notebooks/train/ticha_trocr_beams_r2l_rerank.ipynb) | **Right-to-left reranker** | `trocr-base-handwritten-finetuned-smooth-cosine-aug-r2l-th687` |
-| | | **Run E with 5, 8 or 10 beams and with reranking**; the best system is run E + 10 beams + right-to-left rerank (new decodings of run E, not new models) | `beams-r2l-rerank-linear-aug-th687` |
-| 4 | [`reports/ticha_trocr_evaluation.ipynb`](notebooks/reports/ticha_trocr_evaluation.ipynb) | **Pretrained (no fine-tuning)**: `microsoft/trocr-base-handwritten`, scored zero-shot | `evaluation/` |
-| 5 | [`reports/ticha_report_metrics.ipynb`](notebooks/reports/ticha_report_metrics.ipynb) | None: collects the numbers, tables and figures of the report | `data/evaluation/report_metrics/` in the repository |
+| Order | Notebook | Models in the report | Run folder | Run record |
+|---|---|---|---|---|
+| 1 | [`train/ticha_trocr_finetuning.ipynb`](notebooks/train/ticha_trocr_finetuning.ipynb) | **Smoothing, cosine** (run D) | `trocr-base-handwritten-finetuned-smooth-cosine` | [outputs](notebooks/train/trained/ticha_trocr_finetuning.with-outputs.ipynb) |
+| 2 | [`train/ticha_trocr_ablation_smoothing_schedule.ipynb`](notebooks/train/ticha_trocr_ablation_smoothing_schedule.ipynb) | **No smoothing, linear** (run A) | `ablation-smoothing-schedule/a-no-smoothing-linear` | [outputs](notebooks/train/trained/ticha_trocr_ablation_smoothing_schedule.with-outputs.ipynb) |
+| | | **Smoothing, linear** (run B) | `ablation-smoothing-schedule/b-smoothing-linear` | |
+| | | **Smoothing, linear + augmentation** (run E, the best fine-tuned model) | `ablation-smoothing-schedule/e-smoothing-linear-augmentation` | |
+| 3 | [`train/ticha_trocr_beams_r2l_rerank.ipynb`](notebooks/train/ticha_trocr_beams_r2l_rerank.ipynb) | **Right-to-left reranker** | `trocr-base-handwritten-finetuned-smooth-cosine-aug-r2l-th687` | [outputs](notebooks/train/trained/ticha_trocr_beams_r2l_rerank.with-outputs.ipynb) |
+| | | **Run E with 5, 8 or 10 beams and with reranking**; the best system is run E + 10 beams + right-to-left rerank (new decodings of run E, not new models) | `beams-r2l-rerank-linear-aug-th687` | |
+| 4 | [`reports/ticha_trocr_evaluation.ipynb`](notebooks/reports/ticha_trocr_evaluation.ipynb) | **Pretrained (no fine-tuning)**: `microsoft/trocr-base-handwritten`, scored zero-shot | `evaluation/` | |
+| 5 | [`reports/ticha_report_metrics.ipynb`](notebooks/reports/ticha_report_metrics.ipynb) | None: collects the numbers, tables and figures of the report | `data/evaluation/report_metrics/` in the repository | |
 
 The fine-tuning notebook also trains two runs that the ablation uses as
 reference points but the report's table leaves out: the 5-epoch first run
@@ -351,10 +369,10 @@ reference points but the report's table leaves out: the 5-epoch first run
 (`trocr-base-handwritten-finetuned-smooth-cosine-aug`). The ablation also trains
 run C (no smoothing, cosine schedule). The models that read new lines,
 [`maclenn77/ticha-trocr-base`](https://huggingface.co/maclenn77/ticha-trocr-base),
-are published, so [`train/ticha_trocr_usage_example.ipynb`](notebooks/train/ticha_trocr_usage_example.ipynb)
+are published, so [`ticha_trocr_usage_example.ipynb`](notebooks/ticha_trocr_usage_example.ipynb)
 needs no training.
 
-The dataset pipeline and the report notebooks use the conda environment
+The dataset pipeline, the usage example and the report notebooks use the conda environment
 described in [`ENVIRONMENT.md`](ENVIRONMENT.md). The training notebooks run on
 a GPU machine with [`requirements-trocr.txt`](requirements-trocr.txt), also
 described there.

@@ -43,6 +43,12 @@ unchanged.
 - Notebooks for the data pipeline, TrOCR training, evaluation and report
   metrics. Each training notebook has a clean copy and a `.with-outputs` run
   record. Experiments left out of the report are not published.
+- The training notebooks share their settings, data cleaning, model setup and
+  scoring through `notebooks/train/trocr_setup.py`, `trocr_data.py`,
+  `trocr_model.py` and `trocr_eval.py`; their hyperparameters stay in the
+  notebooks. The runs that produced the report's models are kept with their
+  outputs in `notebooks/train/trained/`. The usage example moved to
+  `notebooks/`.
 - The data pipeline notebook builds steps 6-10 with the functions of
   `scripts/build_dataset.py`, so it reproduces the published dataset v1.1
   (documents in `scripts/dataset_exclusions.py` left out).
