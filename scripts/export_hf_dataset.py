@@ -32,6 +32,9 @@ from dataset_exclusions import DATASET_VERSION, EXCLUDED_DOCS
 
 ROOT = Path(__file__).resolve().parents[1]
 SHARD_BYTES = 300 * 1024 * 1024
+# The Hub's dataset viewer reads at most 300 MB at a time: small row groups and a page index keep each read
+# well below that (a whole shard in one row group is ~315 MB).
+ROW_GROUP_ROWS = 100
 
 ORIGINAL_FEATURES = {
     "id": "string", "image": "image", "text": "string", "doc_id": "string", "page": "int32",
@@ -85,7 +88,8 @@ def write_shards(rows: pd.DataFrame, spec: dict, folder: Path, split: str) -> li
             else:
                 columns[name] = chunk[name].tolist()
         path = folder / f"{split}-{k:05d}-of-{len(shards):05d}.parquet"
-        pq.write_table(pa.Table.from_pydict(columns, schema=schema), path)
+        pq.write_table(pa.Table.from_pydict(columns, schema=schema), path,
+                       row_group_size=ROW_GROUP_ROWS, write_page_index=True)
         paths.append(path)
     return paths
 
@@ -261,11 +265,12 @@ train = concatenate_datasets([original["train"], augmented["train"]])
 | Version | Revision | Changes |
 |---|---|---|
 | 1.0 | [`b9747c9`](https://huggingface.co/datasets/{repo_id}/tree/b9747c957ff1a642d86fdb7f5a4cbc717a249e20) (2026-10-12) | First release |
-| {DATASET_VERSION} | this revision | {excluded_note} |
+| 1.1 | [`b86f9cf`](https://huggingface.co/datasets/{repo_id}/tree/b86f9cf04882f389f4488451c004e3aa8a9b22b7) (2026-10-24) | {excluded_note} |
+| {DATASET_VERSION} | this revision | The same lines as 1.1. The Parquet files are written in row groups of 100 lines with a page index, so the dataset viewer can read them |
 
-Train and validation are the same in both versions, so a model trained on either one can be scored on the
-{DATASET_VERSION} test split as it is. The 1.0 test split has Za687, the same pages as Th687 in train: leave that
-document out when evaluating on it. Load a specific version with
+Train and validation are the same in every version, so a model trained on any of them can be scored on the
+{DATASET_VERSION} test split as it is. 1.1 and {DATASET_VERSION} hold the same lines. The 1.0 test split has Za687,
+the same pages as Th687 in train: leave that document out when evaluating on it. Load a specific version with
 `load_dataset("{repo_id}", "original", revision="v{DATASET_VERSION}")`.
 
 ## Fields

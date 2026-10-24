@@ -7,7 +7,7 @@ the report were trained on it). Used by ``build_dataset.py`` and
 ``export_hf_dataset.py``.
 """
 
-DATASET_VERSION = "1.1"
+DATASET_VERSION = "1.1.1"
 
 EXCLUDED_DOCS = {
     "Za687": "same pages and transcription as Th687 (train): the manuscript is catalogued twice in Ticha",
