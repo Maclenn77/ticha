@@ -4,7 +4,7 @@ message: >-
   of the manuscript images and transcriptions.
 type: software
 title: "ticha: Colonial Zapotec manuscripts from Ticha, a line-level HTR dataset and TrOCR models"
-version: 1.0.0
+version: 1.0.1
 date-released: 2026-10-25
 license: MIT
 repository-code: "https://github.com/Maclenn77/ticha"
