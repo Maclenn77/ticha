@@ -1,6 +1,6 @@
 """Colonial Zapotec manuscripts from Ticha: scraping, HTR dataset and recognition."""
 
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 
 __all__ = ["TichaScraper", "TichaTextScraper", "TichaImageScraper"]
 
