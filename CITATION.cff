@@ -1,0 +1,74 @@
+cff-version: 1.2.0
+message: >-
+  If you use this software, please cite it as below, and cite Ticha, the source
+  of the manuscript images and transcriptions.
+type: software
+title: "ticha: Colonial Zapotec manuscripts from Ticha, a line-level HTR dataset and TrOCR models"
+version: 1.0.1
+date-released: 2026-10-25
+license: MIT
+repository-code: "https://github.com/Maclenn77/ticha"
+authors:
+  - family-names: Pérez-Tejada
+    given-names: Juan Paulo
+    orcid: "https://orcid.org/0009-0003-9501-9918"
+abstract: >-
+  Tools for the Colonial Zapotec manuscripts of the Ticha Digital Text Explorer:
+  scrapers for the manuscript list, transcriptions and page images; a pipeline
+  that segments pages into lines with kraken and pairs them with their
+  transcriptions to build a line-level handwritten text recognition (HTR)
+  dataset; and code to train TrOCR on it and read new lines with the fine-tuned
+  models.
+keywords:
+  - Zapotec
+  - Colonial Zapotec
+  - manuscripts
+  - digital humanities
+  - handwritten text recognition
+  - HTR
+  - OCR
+  - TrOCR
+  - kraken
+  - low-resource languages
+references:
+  - type: website
+    title: "Ticha: a digital text explorer for Colonial Zapotec"
+    url: "https://ticha.haverford.edu"
+    publisher:
+      name: Haverford College Libraries
+    editors:
+      - family-names: Lillehaugen
+        given-names: Brook Danielle
+      - family-names: Broadwell
+        given-names: George Aaron
+      - family-names: Oudijk
+        given-names: Michel R.
+      - family-names: Allen
+        given-names: Laurie
+      - family-names: Plumb
+        given-names: May Helena
+      - family-names: Zarafonetis
+        given-names: Mike
+    authors:
+      - name: Ticha project
+  - type: data
+    title: "Ticha manuscript lines: a line-level HTR dataset of Colonial Zapotec and Spanish manuscripts"
+    url: "https://huggingface.co/datasets/maclenn77/ticha-htr-lines"
+    year: 2026
+    publisher:
+      name: Hugging Face
+    authors:
+      - family-names: Pérez-Tejada
+        given-names: Juan Paulo
+        orcid: "https://orcid.org/0009-0003-9501-9918"
+  - type: software
+    title: "ticha-trocr-base: TrOCR fine-tuned on Colonial Zapotec and Spanish manuscript lines"
+    url: "https://huggingface.co/maclenn77/ticha-trocr-base"
+    year: 2026
+    publisher:
+      name: Hugging Face
+    license: CC-BY-NC-SA-4.0
+    authors:
+      - family-names: Pérez-Tejada
+        given-names: Juan Paulo
+        orcid: "https://orcid.org/0009-0003-9501-9918"

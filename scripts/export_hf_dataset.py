@@ -386,14 +386,14 @@ line or corrected from the image; and, in the `augmented` config, synthetic copi
 
 ## Citation
 
-Dataset author: J. P. Pérez Tejada ([ORCID 0009-0003-9501-9918](https://orcid.org/0009-0003-9501-9918)).
+Dataset author: Juan Paulo Pérez-Tejada ([ORCID 0009-0003-9501-9918](https://orcid.org/0009-0003-9501-9918)).
 
 When you use this dataset, cite both the dataset and Ticha, the source of the images and transcriptions. If you
 use or adapt the code that built it, cite the repository as well.
 
 ```bibtex
 @misc{{perez_tejada_ticha_htr_lines_2026,
-  author       = {{P{{\\'e}}rez Tejada, J. P.}},
+  author       = {{P{{\\'e}}rez-Tejada, Juan Paulo}},
   title        = {{Ticha manuscript lines: a line-level HTR dataset of Colonial Zapotec and Spanish manuscripts}},
   year         = {{2026}},
   publisher    = {{Hugging Face}},
@@ -410,7 +410,7 @@ use or adapt the code that built it, cite the repository as well.
 }}
 
 @software{{perez_tejada_ticha_code_2026,
-  author       = {{P{{\\'e}}rez Tejada, J. P.}},
+  author       = {{P{{\\'e}}rez-Tejada, Juan Paulo}},
   title        = {{ticha: scraping Ticha and building a line-level HTR dataset}},
   year         = {{2026}},
   url          = {{https://github.com/Maclenn77/ticha}}
