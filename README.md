@@ -1,5 +1,7 @@
 # Ticha
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23640278.svg)](https://doi.org/10.5281/zenodo.23640278)
+
 Tools for the Colonial Zapotec manuscripts of the
 [Ticha Digital Text Explorer](https://ticha.haverford.edu/): download the
 manuscripts and their transcriptions, build a line-level handwritten text
@@ -430,7 +432,18 @@ This package is designed for academic research purposes. Please:
 
 ## Citation
 
-When using data downloaded with this tool, please cite:
+If you use this software, the dataset or the models, please cite them
+([`CITATION.cff`](CITATION.cff); GitHub's "Cite this repository" gives APA and
+BibTeX):
+
+> Pérez-Tejada, J. P. (2026). *ticha: Colonial Zapotec manuscripts from Ticha, a
+> line-level HTR dataset and TrOCR models*. Zenodo.
+> https://doi.org/10.5281/zenodo.23640278
+
+This DOI always resolves to the latest release; each release also has its own
+DOI on Zenodo.
+
+When using data downloaded with this tool, please also cite:
 
 > Ticha: a digital text explorer for Colonial Zapotec. Brook Danielle Lillehaugen, George Aaron Broadwell, et al. https://ticha.haverford.edu/
 
