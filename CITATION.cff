@@ -6,6 +6,14 @@ type: software
 title: "ticha: Colonial Zapotec manuscripts from Ticha, a line-level HTR dataset and TrOCR models"
 version: 1.0.1
 date-released: 2026-10-25
+doi: 10.5281/zenodo.23640278
+identifiers:
+  - type: doi
+    value: 10.5281/zenodo.23640278
+    description: All versions (resolves to the latest release)
+  - type: doi
+    value: 10.5281/zenodo.23640279
+    description: Version 1.0.1
 license: MIT
 repository-code: "https://github.com/Maclenn77/ticha"
 authors:
